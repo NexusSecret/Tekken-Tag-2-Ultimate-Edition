@@ -211,7 +211,7 @@ class RunStandIn(unittest.TestCase):
         motion = b'MOTION PACK'
         archives = mock.Mock()
         archives.has.return_value = True
-        archives.read_name.side_effect = lambda name: {'hei.xml': b'<hei/>'}[name]
+        archives.read_name.side_effect = lambda name: {'hei.xml': b'<hei/>', 'hei.bon': b'bon'}[name]
         archives.entry.side_effect = lambda what, row: {('data006', 13): donor_moveset(),
                                                          ('data005', 13): motion}[(what, row)]
         src = mock.Mock(game='tekken8', NAME='Tekken 8')
@@ -236,6 +236,8 @@ class RunStandIn(unittest.TestCase):
                    mock.patch.object(importer.voice, 'voice_list', return_value='vlist'),
                    mock.patch.object(importer.voice, 'merge', return_value=(b'merged', 39)),
                    mock.patch.object(importer.bone, 'read', return_value={}),
+                   mock.patch.object(importer.face, 'retarget', side_effect=lambda moves, motions, *rest: (
+                       moves, motions, 0, {})),
                    mock.patch.object(importer.weapons, 'of_skeleton', return_value=()),
                    mock.patch.object(importer, '_shared', side_effect=lambda s, *rest: made.append(s))]
         with tempfile.TemporaryDirectory() as out, contextlib.ExitStack() as stack:
@@ -279,7 +281,7 @@ class RunOwnVoice(unittest.TestCase):
     def test_run(self):
         archives = mock.Mock()
         archives.has.return_value = True
-        archives.read_name.side_effect = lambda name: {'jun.xml': b'<jun/>'}[name]
+        archives.read_name.side_effect = lambda name: {'jun.xml': b'<jun/>', 'jun.bon': b'bon'}[name]
         k = mock.Mock(name='her moveset')
         src = mock.Mock(game='tekken8', NAME='Tekken 8')
         clips = src.clips.return_value
@@ -300,6 +302,8 @@ class RunOwnVoice(unittest.TestCase):
                    mock.patch.object(importer.voice, 'voice_list', return_value='vlist'),
                    mock.patch.object(importer.voice, 'merge', return_value=(b'merged', 39)),
                    mock.patch.object(importer.bone, 'read', return_value={}),
+                   mock.patch.object(importer.face, 'retarget', side_effect=lambda moves, motions, *rest: (
+                       moves, motions, 0, {})),
                    mock.patch.object(importer.weapons, 'of_skeleton', return_value=()),
                    mock.patch.object(importer, '_shared')]
         with tempfile.TemporaryDirectory() as out, contextlib.ExitStack() as stack:

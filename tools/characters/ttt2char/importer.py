@@ -17,7 +17,7 @@ import types
 
 from . import InputError, pack, shared, source as sources
 from .characters import CHARACTERS, GAMES, definition, game_of
-from .convert import art, chains, cloth, effects as fx, idmaps, itemdb, model, movelist, moveset, outfits, particles, \
+from .convert import art, chains, cloth, effects as fx, face, idmaps, itemdb, model, movelist, moveset, outfits, particles, \
     tagsystem, tiger, voice, weapons
 from .tekken7 import tkmvst
 from .tekken7.autodump import FILES
@@ -355,6 +355,13 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
         moves, motions, xml, effect_files, mvl = _converted_moveset(source.paks, archives, d, slot, place, own_moveset,
                                                                     heihachi, donor_xml, effect_files, wins, vlist,
                                                                     voice_extra, opt_anims, part3, bon, log, step)
+
+    lids = face.tekken7_lids(tkmvst.face_animations(own_moveset)) if own_moveset is not None else None
+    moves, motions, changed, lid_scales = face.retarget(moves, motions, bone.read(bon),
+                                                        bone.read(archives.read_name(d.DONOR + '.bon')), lids)
+    if changed:
+        log('         face animations moved with its face joints: %d%s' % (changed, ''.join(
+            ', %s turned x%.2f' % (name.replace('_Joint', ''), sc) for name, sc in sorted(lid_scales.items()))))
 
     contents = {'.xml': xml, '.nud': nud, '.nut': nut, '.bon': bon, '.moveset': moves, '.motion': motions}
     contents.update(banks)
