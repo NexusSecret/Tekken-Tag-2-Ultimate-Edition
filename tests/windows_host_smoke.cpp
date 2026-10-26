@@ -48,11 +48,17 @@ int main() {
     require(good,"concurrent positional I/O");
     require(io::flush(fd)==0 && io::close(fd)==0,"flush and close");
     require(fs::remove(file),"test cleanup");
-    _putenv_s("TZ","UTC0"); _tzset();
-    require(utc_offset_seconds(1705320000)==0,"UTC offset");
-    _putenv_s("TZ","EST5EDT"); _tzset();
-    require(utc_offset_seconds(1705320000)==-18000,"winter offset");
-    require(utc_offset_seconds(1721044800)==-14400,"summer offset");
+    TIME_ZONE_INFORMATION utc_zone{};
+    require(utc_offset_seconds(1705320000, &utc_zone)==0,"UTC offset");
+    TIME_ZONE_INFORMATION eastern{};
+    eastern.Bias=300; eastern.DaylightBias=-60;
+    eastern.StandardDate={0,11,0,1,2,0,0,0}; // first Sunday in November, 02:00
+    eastern.DaylightDate={0,3,0,2,2,0,0,0}; // second Sunday in March, 02:00
+    require(utc_offset_seconds(1705320000, &eastern)==-18000,"winter offset");
+    require(utc_offset_seconds(1721044800, &eastern)==-14400,"summer offset");
+    TIME_ZONE_INFORMATION half_hour{}; half_hour.Bias=-330;
+    require(utc_offset_seconds(1704065400, &half_hour)==19800,"offset across year boundary");
+    require(utc_offset_seconds(1705320000) % 60 == 0,"system timezone offset");
     pthread_attr_t attr;pthread_t thread;bool stack_ok=false;
     require(pthread_attr_init(&attr)==0 && pthread_attr_setstacksize(&attr,64u<<20)==0,"64MiB thread attributes");
     require(pthread_create(&thread,&attr,thread_main,&stack_ok)==0,"native thread creation");
