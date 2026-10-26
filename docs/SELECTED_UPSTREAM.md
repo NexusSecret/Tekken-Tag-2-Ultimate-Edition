@@ -35,3 +35,10 @@ Regression coverage exercises the production installer on synthetic data: wrong-
 
 
 Installer validation completed: the full native runtime rebuilt; all 12 native CTests passed (the installer test includes 6 end-to-end scenarios); a real 15.9 GB extracted EU v16 game installed successfully in `local/windows-install-validation`; updating that install succeeded; the installed executable started without game arguments or pack/save environment overrides and loaded all 18 fighters, including Reina, from the original pack folder. This last startup check used the null renderer; prior graphical practice tests remain the rendering/gameplay evidence. No desktop shortcut was created during real-game validation; shortcut creation was exercised inside a temporary test directory.
+
+
+## Main merge conflict resolution
+
+Merged upstream main at `1cab8c68f39b252757804fc16399ec61802e91f2` into the Windows branch. Main's face/eyelid changes were already selectively integrated. The branch intentionally retains its tested custom bound/screw conversion policy rather than adopting upstream commit `4770e17` (Bound Mod move lists and definition-only bounds). This includes the matching converter, tag behavior, move-list icons, character definitions, tests, and gameplay documentation; auto-merges of those files were reviewed and restored to the branch policy as a coherent group.
+
+The six conflicting character definitions retain the branch's bound settings, free specials, hitbox fixes, Fahkumram d4/wr3 preservation, and other custom rules. The importer keeps a single face-retarget step. Outfit conversion keeps cached-outfit support and face-joint correction. Pack revision advances to 5, above both parents. Windows runtime, importers and installer are retained. Existing installed packs are unchanged.
