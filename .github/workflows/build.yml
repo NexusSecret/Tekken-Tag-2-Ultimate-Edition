@@ -30,6 +30,7 @@ jobs:
           cmake -S . -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx"
       - run: cmake --build build-linux --parallel 2
       - run: ctest --test-dir build-linux --output-on-failure --timeout 180
+      - run: python launcher/windows/test_backend.py
   windows:
     name: Windows portable tools and importer
     runs-on: windows-latest
@@ -53,3 +54,12 @@ jobs:
       - run: cmake --build build-windows-ci --parallel 2
       - run: ctest --test-dir build-windows-ci --output-on-failure --timeout 120
       - run: python tools/test_character_importer.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Windows launcher window smoke test
+        shell: pwsh
+        run: >-
+          python launcher/windows/main.py --build-dir build-windows-ci
+          --config "$env:RUNNER_TEMP/ttt2-launcher-test.json"
+          --ui-smoke-test "$env:RUNNER_TEMP/ttt2-launcher-ui.json"

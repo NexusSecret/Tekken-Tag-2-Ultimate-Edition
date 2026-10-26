@@ -49,6 +49,7 @@ if(TTT2_TOOLS_ONLY)
         target_compile_features(ttt2-play PRIVATE cxx_std_20)
         target_link_options(ttt2-play PRIVATE -municode -static)
         enable_testing()
+        add_subdirectory(launcher/windows)
         set(SDL3_DIR "${CMAKE_SOURCE_DIR}/third_party/windows/SDL3-3.4.18/x86_64-w64-mingw32/lib/cmake/SDL3")
         find_package(SDL3 REQUIRED CONFIG)
         add_executable(windows_installer_driver tests/windows_installer_driver.cpp

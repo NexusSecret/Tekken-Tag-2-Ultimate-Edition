@@ -138,6 +138,38 @@ dumps from the debugging options under `local/` too.
 
 ## The launcher
 
+### Windows launcher
+
+The Windows build also produces `build-windows-tools/ttt2-launcher.exe`.
+This opens a separate Windows interface; the GTK launcher and Linux build/import
+paths are unchanged. It needs Python 3 with Tcl/Tk (included by the standard
+python.org installer); conversion also needs numpy and Pillow. Set `TTT2_PYTHON`
+to a Python executable to override automatic discovery.
+
+The Windows interface provides Play, Build/Rebuild, Install, Update installed game,
+individual fighter import/update/removal (including Reina), selectable game/data/
+pack/save/tool paths, display settings, a keyboard.ini editor, import cancellation,
+and persistent task/game logs. It calls the existing Windows build scripts,
+native installer, and shared character importer. Rebuilding requires the source
+checkout and Windows build tools. Keep the executable in its build folder with
+the project's `launcher/windows` source directory available alongside the build.
+
+It detects the existing development archive, extracted title, fighter packs,
+saves, and CMake toolchain. Use **Paths**, then **Save paths**, to change them.
+Development configuration is saved in ignored `local/windows-launcher.json`;
+other layouts use `%LOCALAPPDATA%/TTT2Ultimate/launcher.json`. The data folder must
+end in `TTT2Ultimate` so runtime settings and launcher settings use the same place.
+Explicit fighter/save paths are passed to both the game and importer. Packs
+marked **Update available** still load: this compares revisions from the shared
+importer and never automatically rebuilds anything.
+
+Task/game logs are saved under the selected data folder's `logs/` directory;
+startup errors are saved beside the executable in `launcher.log`. Build/install
+tasks finish before the window closes. Import cancellation requests cleanup and
+keeps completed extraction data. This frontend does not implement AppImage
+self-updates, the GTK key-capture screen, or the Linux uninstall interface.
+
+
 `ttt2-launcher` (**Ultimate Launcher**) does the installing and
 the adding of fighters in a window, without a terminal. **Install…** asks for
 your `.wua` and a folder, checks the PC, builds the game program for it from
