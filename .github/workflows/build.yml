@@ -46,7 +46,7 @@ jobs:
             git mingw-w64-clang-x86_64-toolchain
             mingw-w64-clang-x86_64-cmake mingw-w64-clang-x86_64-ninja
             mingw-w64-clang-x86_64-python mingw-w64-clang-x86_64-python-numpy
-            mingw-w64-clang-x86_64-python-pillow mingw-w64-clang-x86_64-SDL3
+            mingw-w64-clang-x86_64-python-pillow mingw-w64-clang-x86_64-sdl3
       - run: python tools/setup_deps.py
       - name: Configure native Windows tools without game files
         run: cmake -S . -B build-windows-ci -G Ninja -DTTT2_TOOLS_ONLY=ON -DTTT2_WINDOWS_RUNTIME=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
