@@ -87,6 +87,7 @@ int main(int argc, char** argv) {
         usage(argv[0]);
         return 2;
     }
+    install::configure_user_paths();
     install_fault_handler();
     vfs::open_game(game);
     if (const char* save = std::getenv("TTT2_SAVE_DIR")) {

@@ -19,3 +19,19 @@ Validation locally: 633 importer tests, 9 platform/optional skips, no failures; 
 ## Deferred: Windows installer
 
 The fork has a real installer; ours still has an explicit Windows installer stub. Its shortcut directly launches the installed runtime, bypassing our development launcher's custom save and pack locations. Its executable/shortcut naming also overlaps the user's separate Xbox port. Integrating it safely requires a deliberate installed-data migration and distinct shortcut naming, plus install/update tests. It is not needed for the already working launch/import path, so it was not adopted in this change.
+
+
+## Installer integration follow-up
+
+The installer is now integrated after the user requested it. Windows uses the shared installer, copies the game and native DLLs, supports resume/update, and creates `TTT2 Ultimate.lnk`. The old Windows stub is removed.
+
+Windows records absolute pack and save paths in `.ttt2-userdata` next to the installed executable. Explicit `TTT2_CHARACTERS` / `TTT2_SAVE_DIR` win; otherwise a development build detects `local/windows-userdata/TTT2Ultimate/characters` and `local/windows-save`, falling back to the native user-data defaults. The installed runtime applies those settings before roster/save lookup, including updating the CRT environment. Existing packs and saves are referenced, never moved or overwritten; the original data folders must stay available. Reinstall/update keeps the recorded locations.
+
+Windows installation records live under `%LOCALAPPDATA%/TTT2Ultimate/installed`. Windows executable and DLL updates use replacement semantics. The Linux installation behavior is retained.
+
+Run `ttt2-ultimate.exe --install GAME FOLDER` (or omit paths for dialogs); `--no-launcher` skips the desktop shortcut. `--update FOLDER` updates the executable and DLLs. Close the installed game before updating it. An unrelated nonempty destination receives a `TTT2 Ultimate` subfolder rather than being reused.
+
+Regression coverage exercises the production installer on synthetic data: wrong-build refusal, binary file copying, incomplete-install resume, preservation of modified files, pack/save bootstrap and explicit overrides, unchanged settings on reinstall, DLL copying, update, invalid-update refusal, and isolated shortcut creation. Real-game installation validation uses an ignored local validation folder; it does not replace the working game or create a desktop shortcut.
+
+
+Installer validation completed: the full native runtime rebuilt; all 12 native CTests passed (the installer test includes 6 end-to-end scenarios); a real 15.9 GB extracted EU v16 game installed successfully in `local/windows-install-validation`; updating that install succeeded; the installed executable started without game arguments or pack/save environment overrides and loaded all 18 fighters, including Reina, from the original pack folder. This last startup check used the null renderer; prior graphical practice tests remain the rendering/gameplay evidence. No desktop shortcut was created during real-game validation; shortcut creation was exercised inside a temporary test directory.

@@ -49,6 +49,19 @@ if(TTT2_TOOLS_ONLY)
         target_compile_features(ttt2-play PRIVATE cxx_std_20)
         target_link_options(ttt2-play PRIVATE -municode -static)
         enable_testing()
+        set(SDL3_DIR "${CMAKE_SOURCE_DIR}/third_party/windows/SDL3-3.4.18/x86_64-w64-mingw32/lib/cmake/SDL3")
+        find_package(SDL3 REQUIRED CONFIG)
+        add_executable(windows_installer_driver tests/windows_installer_driver.cpp
+            runtime/src/wua.cpp runtime/src/gpu/vulkan/png.cpp)
+        target_include_directories(windows_installer_driver PRIVATE runtime/include runtime/src)
+        target_compile_features(windows_installer_driver PRIVATE cxx_std_20)
+        target_link_libraries(windows_installer_driver PRIVATE windows_zarchive SDL3::SDL3 bcrypt ole32 shell32 uuid)
+        add_custom_command(TARGET windows_installer_driver POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:windows_installer_driver>)
+        find_package(Python3 REQUIRED COMPONENTS Interpreter)
+        add_test(NAME windows_installer_test COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tests/windows_installer_test.py $<TARGET_FILE:windows_installer_driver>)
+
         add_executable(windows_host_smoke tests/windows_host_smoke.cpp)
         target_include_directories(windows_host_smoke PRIVATE runtime/src)
         target_compile_features(windows_host_smoke PRIVATE cxx_std_20)

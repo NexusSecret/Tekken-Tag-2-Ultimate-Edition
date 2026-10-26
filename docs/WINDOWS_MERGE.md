@@ -4,7 +4,7 @@
 
 Branch: `codex/native-windows-t7-reina`, based on gameplay commit `e3839c9e3c44b187f4ad397186be1b308d4cc3f2`. This checkpoint preserves the existing gameplay customizations and the selectively reviewed Windows fixes from verqion's PR #19 (revision `5269b05777c53db8076d54397c8edeb3aba498a4`). That PR was not merged wholesale.
 
-Both native imports have completed: all 17 T7 packs and Reina's own T8 moveset, plus shared assets for all 18 fighters. The user confirmed a T7 fighter works in Practice, then confirmed Reina works after relaunch. These live results supersede the historical progress notes below. Native Windows install/update is still a stub; launching through the WUA is the tested route.
+Both native imports have completed: all 17 T7 packs and Reina's own T8 moveset, plus shared assets for all 18 fighters. The user confirmed a T7 fighter works in Practice, then confirmed Reina works after relaunch. These live results supersede the historical progress notes below. Native Windows install/update is now integrated and validated; see SELECTED_UPSTREAM.md for the follow-up and data-location behavior.
 
 Validation: 11/11 native CTests; earlier importer suite 623 tests with 6 skips; final T8 suite 247 tests with 6 platform/optional skips; Windows importer suite 8 tests. No game assets, generated game code, compiled executables, extracted files, caches, logs, or local compiler dependencies are part of this source checkpoint.
 
