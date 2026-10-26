@@ -58,5 +58,5 @@ foreach(input_check input_test game_input_test)
     target_link_libraries(${input_check} PRIVATE cafe_runtime ttt2_windows_generated)
 endforeach()
 add_test(NAME input_test COMMAND input_test)
-add_test(NAME game_input_test COMMAND game_input_test
-    "${CMAKE_SOURCE_DIR}/local/wua-windows/0000000000000000_v0/code/Tekken.rpx")
+set(TTT2_WINDOWS_TEST_RPX "${CMAKE_SOURCE_DIR}/local/wua-windows/0000000000000000_v0/code/Tekken.rpx" CACHE FILEPATH "RPX used by native gameplay input regression")
+add_test(NAME game_input_test COMMAND game_input_test "${TTT2_WINDOWS_TEST_RPX}")

@@ -7,3 +7,5 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME windows_launcher_backend_test COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/test_backend.py)
 set_target_properties(ttt2-launcher PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+add_test(NAME windows_first_run_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_setup.py)

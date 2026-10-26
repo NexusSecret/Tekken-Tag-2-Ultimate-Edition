@@ -33,7 +33,7 @@ class Settings:
         saves = self.root / 'local/windows-save'
         self.values = dict(source=first(self.build / 'ttt2-game.txt'), title=str(title) if title.exists() else '',
                            install=first(local / 'installed'), data=str(data), packs=str(data / 'characters'),
-                           saves=str(saves if saves.exists() else data / 'save'), tools=tools)
+                           saves=str(saves if saves.exists() else data / 'save'), tools=tools or str(self.root / 'local/windows-tools'))
         if self.file.exists(): self.values.update(json.loads(self.file.read_text(encoding='utf-8')))
 
     def save(self):
@@ -46,7 +46,7 @@ class Settings:
     def environment(self):
         env = dict(os.environ, TTT2_DATA_DIR=self.values['data'], TTT2_CHARACTERS=self.values['packs'],
                    TTT2_SAVE_DIR=self.values['saves'], PYTHONUTF8='1', PYTHONUNBUFFERED='1')
-        env['PYTHONPATH'] = str(self.root / 'local/windows-python') + os.pathsep + env.get('PYTHONPATH', '')
+        env['PYTHONPATH'] = os.pathsep.join([str(self.root / 'local/windows-python'), str(Path(self.values['tools']) / 'python'), env.get('PYTHONPATH', '')])
         compiler = Path(self.values['tools']) / 'llvm-mingw-20261020-ucrt-x86_64/bin/clang.exe'
         if compiler.exists():
             env['TTT2_HELPER_CC'] = str(compiler)
@@ -116,8 +116,11 @@ def run_command(command, settings):
 
 def worker(settings, action, names):
     os.environ.update(settings.environment())
-    sys.path[:0] = [str(settings.root / 'local/windows-python'), str(settings.root / 'tools/characters')]
-    if action == 'build':
+    sys.path[:0] = [str(settings.root / 'local/windows-python'), str(settings.root / 'tools/characters'), str(Path(settings.values['tools']) / 'python')]
+    if action == 'setup':
+        from setup_game import setup
+        setup(settings, run_command)
+    elif action == 'build':
         tools = Path(settings.values['tools'])
         if not (tools / 'python/cmake/data/bin/cmake.exe').is_file():
             raise ValueError('Select the Windows build tools folder in Paths first.')

@@ -22,11 +22,13 @@ std::wstring environment(const wchar_t* name) {
     DWORD n=GetEnvironmentVariableW(name,nullptr,0); if(!n) return {};
     std::wstring result(n,L'\0'); GetEnvironmentVariableW(name,result.data(),n); result.resize(n-1); return result;
 }
-fs::path python() {
+fs::path python(const fs::path& folder) {
     if(auto value=environment(L"TTT2_PYTHON"); !value.empty()) {
         if(!fs::is_regular_file(value)) throw std::runtime_error("TTT2_PYTHON does not name a Python executable.");
         return value;
     }
+    const auto portable=folder.parent_path()/"local/windows-tools/python-runtime/python/python.exe";
+    if(fs::is_regular_file(portable)) return portable;
     for(HKEY hive:{HKEY_CURRENT_USER,HKEY_LOCAL_MACHINE}) {
         HKEY parent;
         if(RegOpenKeyExW(hive,L"Software\\Python\\PythonCore",0,KEY_READ,&parent)!=ERROR_SUCCESS) continue;
@@ -61,7 +63,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int) {
         if(!fs::exists(script)) throw std::runtime_error("Keep this launcher in the project's build folder, beside the launcher/windows source folder.");
         int argc=0; LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);
         if(!argv) throw std::runtime_error("Cannot read launcher arguments.");
-        bool check=false; auto interpreter=python();
+        bool check=false; auto interpreter=python(folder);
         std::wstring command=quote(interpreter.wstring())+L" -u "+quote(script.wstring())+L" --build-dir "+quote(folder.wstring());
         for(int i=1;i<argc;++i) { command+=L" "+quote(argv[i]); if(std::wstring(argv[i])==L"--check") check=true; }
         LocalFree(argv);

@@ -140,19 +140,41 @@ dumps from the debugging options under `local/` too.
 
 ### Windows launcher
 
+**Starting from a downloaded project ZIP (Windows 10/11, x64):**
+
+1. Download this branch as a ZIP and **Extract All** into a writable folder.
+2. Double-click **Start Ultimate Launcher.cmd** in that folder. The first start
+   downloads and verifies a private Python/Tk runtime. No Python installation,
+   Git installation, terminal commands or second project download are needed.
+3. Click **Set Up Game**, select your own European Wii U TTT2 `.wua` containing
+   update v16, and choose an installation folder.
+4. Leave setup running while it downloads missing tools, prepares libraries,
+   checks your game executable, builds and installs the Windows game.
+5. Click **Play** when setup completes. To add fighters, open Steam, close T7/T8,
+   select fighters and use **Import / Update selected**. Reina requires Tekken 8.
+
+The first setup needs internet, a Vulkan-capable graphics driver, an x86-64-v3
+CPU and substantial free disk space for the tools, generated build and game.
+It can take a while; keep the extracted project folder for future updates.
+Downloads are private to ignored `local/` folders. Python, LLVM-MinGW and MinGit
+archives are SHA-256 pinned; Python packages are version pinned. Existing
+project files are reused; the game and its assets are never downloaded.
+Setup logs remain under the selected data folder. The game archive is kept.
+
+
 The Windows build also produces `build-windows-tools/ttt2-launcher.exe`.
 This opens a separate Windows interface; the GTK launcher and Linux build/import
-paths are unchanged. It needs Python 3 with Tcl/Tk (included by the standard
-python.org installer); conversion also needs numpy and Pillow. Set `TTT2_PYTHON`
+paths are unchanged. The ZIP startup path obtains private Python/Tk automatically; developer launches
+can also use an installed Python 3 with Tcl/Tk. Setup obtains numpy and Pillow. Set `TTT2_PYTHON`
 to a Python executable to override automatic discovery.
 
 The Windows interface provides Play, Build/Rebuild, Install, Update installed game,
 individual fighter import/update/removal (including Reina), selectable game/data/
 pack/save/tool paths, display settings, a keyboard.ini editor, import cancellation,
 and persistent task/game logs. It calls the existing Windows build scripts,
-native installer, and shared character importer. Rebuilding requires the source
-checkout and Windows build tools. Keep the executable in its build folder with
-the project's `launcher/windows` source directory available alongside the build.
+native installer, and shared character importer. Set Up Game prepares the build tools automatically from the extracted project.
+Keep the project folder for rebuilds. The compiled launcher executable can also
+be opened from its build folder after setup.
 
 It detects the existing development archive, extracted title, fighter packs,
 saves, and CMake toolchain. Use **Paths**, then **Save paths**, to change them.

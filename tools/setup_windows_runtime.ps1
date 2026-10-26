@@ -12,8 +12,12 @@ try {
         curl.exe -L --fail --silent --show-error -o $archive https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-devel-3.4.18-mingw.zip
         if ($LASTEXITCODE -ne 0) { throw 'SDL download failed' }
     }
-    if ((Get-FileHash -LiteralPath $archive).Hash -ne 'CD98158C8D025A816F430A600B4E9526524E6219EE884EC72BD498B80FD3BF58') { throw 'SDL checksum mismatch' }
-    if (!(Test-Path -LiteralPath (Join-Path $native 'SDL3-3.4.18'))) { Expand-Archive -LiteralPath $archive -DestinationPath $native }
+    $sdlHash=& python -c "import hashlib,sys;print(hashlib.file_digest(open(sys.argv[1],'rb'),'sha256').hexdigest())" $archive
+    if ($LASTEXITCODE -ne 0 -or $sdlHash -ne 'cd98158c8d025a816f430a600b4e9526524e6219ee884ec72bd498b80fd3bf58') { throw 'SDL checksum mismatch' }
+    if (!(Test-Path -LiteralPath (Join-Path $native 'SDL3-3.4.18'))) {
+        & python -m zipfile -e $archive $native
+        if ($LASTEXITCODE -ne 0) { throw 'SDL extraction failed' }
+    }
     $compiler=Join-Path $ToolsRoot 'llvm-mingw-20261020-ucrt-x86_64/bin'
     $exportLines=& "$compiler/llvm-readobj.exe" --coff-exports "$env:WINDIR/System32/vulkan-1.dll"
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read installed Vulkan loader' }

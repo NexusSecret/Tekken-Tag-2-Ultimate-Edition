@@ -31,6 +31,7 @@ jobs:
       - run: cmake --build build-linux --parallel 2
       - run: ctest --test-dir build-linux --output-on-failure --timeout 180
       - run: python launcher/windows/test_backend.py
+      - run: python launcher/windows/test_setup.py
   windows:
     name: Windows portable tools and importer
     runs-on: windows-latest
@@ -63,3 +64,6 @@ jobs:
           python launcher/windows/main.py --build-dir build-windows-ci
           --config "$env:RUNNER_TEMP/ttt2-launcher-test.json"
           --ui-smoke-test "$env:RUNNER_TEMP/ttt2-launcher-ui.json"
+      - name: Source ZIP first-run runtime check
+        shell: cmd
+        run: call "Start Ultimate Launcher.cmd" --check

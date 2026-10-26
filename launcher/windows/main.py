@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import traceback
+import contextlib
 
 from backend import Settings, fighters, worker
 
@@ -17,7 +18,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--config', type=Path)
-    parser.add_argument('--worker', choices=('build', 'install', 'update', 'import', 'remove'))
+    parser.add_argument('--worker', choices=('setup', 'build', 'install', 'update', 'import', 'remove'))
     parser.add_argument('--cancel-file', type=Path)
     parser.add_argument('--ui-smoke-test', type=Path)
     parser.add_argument('--check', action='store_true')
@@ -46,7 +47,7 @@ def main():
 
     window = tk.Tk()
     window.title('Ultimate Launcher — Windows')
-    window.geometry('1000x790')
+    window.geometry('1120x790')
     window.minsize(850, 700)
     style = ttk.Style(window)
     if 'vista' in style.theme_names(): style.theme_use('vista')
@@ -145,6 +146,21 @@ def main():
         item = ttk.Button(parent, text=label, command=command); item.pack(side='left', padx=(0, 6))
         buttons.append(item); return item
 
+    def first_setup():
+        if state['process']: return
+        source = filedialog.askopenfilename(parent=window, title='Choose your European Wii U TTT2 archive (update v16)',
+                    filetypes=[('Wii U game archive', '*.wua')])
+        if not source: return
+        folder = filedialog.askdirectory(parent=window, title='Choose where to install TTT2 Ultimate')
+        if not folder: return
+        if not messagebox.askokcancel('Set Up Game',
+                'The launcher will download missing tools, build the game from your archive, and install it. '
+                'This first setup needs internet, at least 30 GB of free space and may take a while. '
+                'Your original archive is kept. Continue?', parent=window): return
+        fields['source'].set(source); fields['install'].set(folder)
+        start('setup')
+
+    button(bar, 'Set Up Game', first_setup)
     button(bar, 'Play', launch_game)
     button(bar, 'Build / Rebuild', lambda: start('build'))
     button(bar, 'Install from Wii U source', lambda: start('install'))
@@ -285,4 +301,12 @@ def main():
 if __name__ == '__main__':
     try: raise SystemExit(main())
     except Exception:
-        traceback.print_exc(); raise SystemExit(1)
+        text = traceback.format_exc()
+        folder = Path(__file__).resolve().parents[2] / 'local'
+        folder.mkdir(exist_ok=True)
+        with (folder / 'windows-launcher-errors.log').open('a', encoding='utf-8') as log: log.write(text)
+        if sys.stderr: sys.stderr.write(text)
+        if sys.platform == 'win32' and not sys.stderr:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, 'The launcher could not start. See local/windows-launcher-errors.log.', 'Ultimate Launcher', 16)
+        raise SystemExit(1)
