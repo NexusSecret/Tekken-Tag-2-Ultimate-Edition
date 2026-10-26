@@ -153,7 +153,7 @@ before acting on a button, and its keyboard keys ([Playing](#playing)). Its
 Characters section shows where Steam has Tekken 7 and Tekken 8, or why one cannot be used, and a part for each game's
 fighters (the installed game's first), with **Add** per fighter: Tekken 7's with **Add All** and its DLC
 fighters in a list that opens, with those your Steam account owns and **Add
-All Owned**; Tekken 8's (Reina) without Tekken 7 or any of its fighters. **Remove** takes one out again. A
+All Owned**; Tekken 8's (Reina, Azucena) without Tekken 7 or any of its fighters. **Remove** takes one out again. A
 Tekken 8 fighter whose moves could not be saved from Tekken 8 (a game update its helper does not know yet, or
 nothing to run it hidden) is added with Heihachi's moves, says so and why, and is offered as an update once
 their own can be saved. What all added fighters share is made from each one's own game, so while one game is

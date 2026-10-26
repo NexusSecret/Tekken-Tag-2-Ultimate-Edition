@@ -4,6 +4,7 @@ from . import tagsystem as TS
 # The string buffer of the fighter's game (a variable a capture row sets and a dispatch row tests: Tekken 7's 352 /
 # 0x80a6, Tekken 8's counterparts in the id maps between the two games); the id maps give TTT2's (313 / 0x8096)
 STRING_VAR, STRING_SET = {'t7': 352, 't8': 358}, {'t7': 0x80a6, 't8': 0x80c5}
+LATCHES = 4                     # TTT2's latches: the string buffer is the first of four, 313..316 (moveset.py)
 
 
 def apply(c):
@@ -237,6 +238,15 @@ def normalize_buffered_strings(c):
         dispatch = {b for row in rows if row['direction'] == 0 and row['button'] == 0
                     for a, b in TS.reqs(c.T, row['req']) if a == variable and b != 0}
         if not set(captures) <= dispatch:
+            continue
+        # A dispatch that also needs another latch set (Azucena's f,f,F+3,2: the hit at frames 15-16 sets latch 2,
+        # the 2 pressed from frame 1 dispatches at 16-19 on it) would test that latch at the press, before anything
+        # sets it: such a move keeps its buffer, which TTT2 plays as Tekken does
+        later = range(variable + 1, variable + LATCHES)
+        dispatches = [TS.reqs(c.T, row['req']) for row in rows if row['direction'] == 0 and row['button'] == 0]
+        if any(a in later and b != 0 for req in dispatches if any(x == variable and y != 0 for x, y in req)
+               for a, b in req):
+            c.stats['buffered strings kept: their dispatch waits for another latch'] += 1
             continue
         direct_buffered_string(c, name)
 
