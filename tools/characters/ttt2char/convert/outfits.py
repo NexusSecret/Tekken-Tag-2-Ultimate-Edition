@@ -5,7 +5,7 @@ Keep gameplay definitions intact: a preset changes only the model inputs.
 import types
 import numpy as np
 
-from . import art, chains, model, tiger, weapons
+from . import art, chains, face, model, tiger, weapons
 from ..tekken7.material import short_ref
 from ..ttt2 import bone, nud, nut
 from ..ttt2.archive import key_of
@@ -167,6 +167,8 @@ def build(paks, archives, rpx, base, slot, xml, springs, body, standing=None, lo
             mesh, textures, skeleton, _, cloth_springs = model.convert(paks, archives, d, slot, log=log,
                                                                        standing=standing)
             mop = springs(skeleton, cloth_springs)
+            if reference_bon is not None:
+                skeleton = face.same_joints(skeleton, reference_bon)
         mesh, textures = relocate(mesh, textures, 0x10500000 + (slot * TEXTURE_STRIDE + i) * 0x1000)
         files.update({code + '.nud': mesh, code + '.nut': textures, code + '.bon': skeleton, code + '.xml': xml})
         skel = bone.read(skeleton)
