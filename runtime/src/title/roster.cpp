@@ -1359,6 +1359,14 @@ void prepare_roster() {
         std::fprintf(stderr, "ttt2: added the fighter %s from %s (id %u)\n", pack.code.c_str(), pack.directory.string().c_str(),
                      added.id);
     }
+    // Optional additions to a native fighter use the same archive overlay as
+    // shared art. Load them even when no added roster fighters are installed.
+    const auto armor = directory / "native" / "aki";
+    if (fs::is_regular_file(armor / "patch.json", ec) &&
+        fs::is_regular_file(armor / "keys" / "da52b90f.bin", ec) &&
+        fs::is_regular_file(armor / "keys" / "f1e8d23d.bin", ec)) {
+        add_shared(armor);
+    }
     if (!g_active) return;
     add_shared(directory / "shared");
     patch_sounds();
@@ -3502,6 +3510,17 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
     std::array<int32_t, 4> before;
     for (size_t i = 0; i < before.size(); ++i) before[i] = static_cast<int32_t>(load(result + 0x2c + 4 * i));
     sub_03AE1704_orig(ctx, base);
+    // Narrow diagnostic for the optional native Armor King wall-throw graft.
+    const auto ak_attacker_move = damage_move_name(attacker);
+    const auto ak_defender_move = damage_move_name(defender);
+    if (ak_attacker_move == "Knk_#2247" || ak_attacker_move == "Knk_#2248" ||
+        ak_defender_move == "Knk_#2247" || ak_defender_move == "Knk_#2248") {
+        std::fprintf(stderr,"armor-wall DAMAGE attacker=%08X move=%.*s defender=%08X victim=%.*s kind=%u flags=%08X combo_count=%u pending_kind=%u pending_points=%u dealt=%d scale=%u\n",
+            attacker,int(ak_attacker_move.size()),ak_attacker_move.data(),
+            defender,int(ak_defender_move.size()),ak_defender_move.data(),
+            load(result+0x40),flags,load(defender+0x1cc),load8(defender+0x487),
+            load(defender+0x4a4),static_cast<int32_t>(load(result+0x2c))-before[0],percent);
+    }
     if (trace_noctis_air(attacker))
         std::fprintf(stderr,"noctis-air HIT player=%08X name=%.*s frame=%u defender=%08X victim=%.*s kind=%u flags=%08X damage=%d\n",
             attacker,int(damage_move_name(attacker).size()),damage_move_name(attacker).data(),
