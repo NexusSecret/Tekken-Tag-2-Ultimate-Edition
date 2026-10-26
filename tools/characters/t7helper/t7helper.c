@@ -221,6 +221,7 @@ static void attach(void) {
         return;
     }
     g_delta = base - PREFERRED_BASE;
+    fprintf(stderr, "attach: PID %lu, executable base 0x%llx\n", pid, base); fflush(stderr);
     const struct Function* all[] = {&ALLOCATE, &FIGHTER_INFO, &LOAD_FIGHTER, &LOAD_COMMON, &FIXUP_MOVESET,
                                     &FIXUP_MOVELIST, &LOAD_FILE, &FREE};
     for (size_t i = 0; i < sizeof all / sizeof all[0]; ++i) {

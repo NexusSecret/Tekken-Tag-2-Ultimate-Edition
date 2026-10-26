@@ -11,7 +11,7 @@
 #include "title/text.h"
 #include "title/title_screen.h"
 
-#include <openssl/evp.h>
+#include "host/digest.h"
 
 #include <algorithm>
 #include <array>
@@ -62,8 +62,7 @@ std::optional<std::vector<uint8_t>> game_entry(const char* archive, uint32_t has
 
 std::array<uint8_t, 16> md5_of(const uint8_t* data, size_t size) {
     std::array<uint8_t, 16> md5{};
-    unsigned int length = 0;
-    EVP_Digest(data, size, md5.data(), &length, EVP_md5(), nullptr);
+    md5 = host::digest<16>(std::span(data, size));
     return md5;
 }
 

@@ -40,3 +40,6 @@ character.ini
 *.pak
 *.nus3bank
 *.part
+
+# Local source backups used during Windows development.
+/work/

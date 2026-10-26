@@ -18,7 +18,10 @@ def main():
     dependencies = json.loads((ROOT / "dependencies.lock.json").read_text())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("names", nargs="*", help="Default: all of dependencies.lock.json")
+    parser.add_argument("--windows", action="store_true", help="Include native Windows build dependencies")
     args = parser.parse_args()
+    if args.windows:
+        dependencies.update(json.loads((ROOT / "dependencies.windows.lock.json").read_text()))
     selected = args.names or list(dependencies)
     for name in selected:
         if name not in dependencies:
