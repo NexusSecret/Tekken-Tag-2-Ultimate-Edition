@@ -1633,7 +1633,10 @@ class Converter:
         self.stats['Tag Crash: moves given the landing tag rows'] += tagsystem.add_landing_rows(
             self.T, tagsystem.landing_template(d.tables, d.aliases), nd, self.aliases)
         made = tagsystem.add_tag_assault(self.T, tagsystem.assault_template(d.tables, d.aliases), nd, self.move_name,
-                                         self.string)
+                                         self.string, self.defn.MOVESET.get('tag_assault_finish_hit', ()))
+        routes = {self.newidx[self.kn[parent]]: {self.newidx[self.kn[target]] for target in targets}
+                  for parent, targets in self.defn.MOVESET.get('tag_assault_strings', {}).items()}
+        self.stats['Tag Assault: string tag inputs restored'] += tagsystem.add_tag_assault_strings(self.T, made, routes)
         self.stats['Tag Assault: bound moves given a tag twin and its exit'] += len(made)
         # ... its idle variants of the stance get the stance's list (tag out, ...), and its launchers tag combos
         # (convert/tagcombo.py)

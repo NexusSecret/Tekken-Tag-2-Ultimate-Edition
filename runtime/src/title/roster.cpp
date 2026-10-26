@@ -3579,7 +3579,7 @@ namespace {
 bool trace_eliza_assist(uint32_t player) {
     if (!std::getenv("TTT2_TRACE_ELIZA_ASSIST") || !player) return false;
     const int k = slot_of_id(load(player + kPlayerSelectId));
-    return k >= 0 && (g_added[k].code == "elz" || g_added[k].code == "kmi" || g_added[k].code == "mry");
+    return k >= 0 && (g_added[k].code == "elz" || g_added[k].code == "kmi" || g_added[k].code == "mry" || g_added[k].code == "rei");
 }
 const char* assist_move_name(uint32_t player) {
     const uint32_t move = load(player + kPlayerMove);
@@ -3643,7 +3643,7 @@ bool special_assist_sequence(uint32_t player) {
     if (!player) return false;
     const int slot = slot_of_id(load(player + kPlayerSelectId));
     const bool supported = slot >= 0 &&
-        (g_added[slot].code == "elz" || g_added[slot].code == "mry");
+        eliza_assist::supported(g_added[slot].code);
     if (!supported) {
         sequences.erase(player);
         return false;
@@ -3657,8 +3657,7 @@ bool special_assist_sequence(uint32_t player) {
         (eliza_assist::entry(name) || eliza_assist::continuation(name));
     const auto window = legacy ? eliza_assist::InputWindow{} : special_assist_window(player);
     const bool glide_finisher = name == "Vp_66lklk" || name == "Vp_66lklk_H" || name == "Vp_6rklkrk";
-    const bool own_move = !glide_finisher && (g_added[slot].code == "elz" ?
-        name.starts_with("Vp_") : name.starts_with("My_"));
+    const bool own_move = !glide_finisher && eliza_assist::owns_move(g_added[slot].code, name);
     const bool starts = legacy ? eliza_assist::entry(name) :
         (window.buffered || (own_move && window.last));
     const uint32_t move = load(player + kPlayerMove);
@@ -3685,7 +3684,7 @@ void trace_assist_follow(uint32_t player) {
     if (!partner || (!load(player + 0x1e88) && !load(partner + 0x1e88))) return;
     const std::string_view name(assist_move_name(player));
     const std::string_view partner_name(assist_move_name(partner));
-    const auto relevant = [](std::string_view n) { return n.starts_with("My_") || n.starts_with("Mt_") || n.starts_with("Vp_"); };
+    const auto relevant = [](std::string_view n) { return n.starts_with("My_") || n.starts_with("Mt_") || n.starts_with("Vp_") || n.starts_with("Zbr_"); };
     if (!relevant(name) && !relevant(partner_name)) return;
     const uint32_t opponent = load(player + 0x98);
     std::fprintf(stderr,

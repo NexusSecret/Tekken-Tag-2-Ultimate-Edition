@@ -108,4 +108,21 @@ int main() {
     assert(!cafe::title::eliza_assist::geese_contact_bridge("My_Jyaei_D", 29));
     assert(!cafe::title::eliza_assist::geese_contact_bridge("Vp_66lklk", 23));
 
+    // Reina uses the same finite ownership windows as the existing 2D assists.
+    using cafe::title::eliza_assist::supported;
+    using cafe::title::eliza_assist::owns_move;
+    assert(supported("rei") && supported("elz") && supported("mry"));
+    assert(!supported("jun") && !supported("akm"));
+    assert(owns_move("rei", "Zbr_sen_RK") && owns_move("rei", "Zbr_3LP"));
+    assert(!owns_move("rei", "Ju_sKAM00_") && !owns_move("elz", "Zbr_3LP"));
+    InputWindow reina_string;
+    reina_string.add(0x182, 0x40000002, 20, false);
+    Session reina;
+    assert(reina.update_window(true, true, true, 7, 13, reina_string.control_end(), true, false));
+    assert(reina.update_window(true, true, true, 7, 20, reina_string.control_end(), true, false));
+    assert(!reina.update_window(true, true, true, 7, 21, reina_string.control_end(), true, false));
+    assert(!reina.update_window(true, true, true, 7, 1, 0, false, false)); // committed SEN 4 releases control
+    assert(!reina.update_window(true, false, true, 7, 1, 21, true, false));
+    assert(!reina.update_window(true, true, false, 7, 1, 21, true, false));
+
 }

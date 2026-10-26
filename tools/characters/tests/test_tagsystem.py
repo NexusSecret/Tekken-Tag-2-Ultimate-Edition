@@ -185,6 +185,54 @@ class Assault(unittest.TestCase):
         # a move that has its twin already is left alone
         self.assertEqual(TS.add_tag_assault(T, tpl, first, lambda i: names[T['moves'][i]['name']], string), [])
 
+    def reina_string(self):
+        d = self.donor()
+        tpl = TS.assault_template(d.t, d.aliases)
+        r = self.reqs
+        finisher = d.move('Zbr_3LPRP', first_active=22, last_active=23,
+            hit_condition=d.hits((r['bound'], 20, self.r_bound), (r['air'], 20, self.r_air),
+                                 (r['never'], 20, self.r_ground)),
+            cancel=d.cancels(dict(req=r['always'], extradata=7, move_id=STANCE), d.end()),
+            extraprops=d.props())
+        parent = d.move('Zbr_3LP', cancel=d.cancels(
+            dict(button=0x40000002, req=r['hit'], extradata=3, win_start=1, win_end=20,
+                 start_frame=15, move_id=finisher), d.end()), extraprops=d.props())
+        def string(name):
+            d.names.append(name)
+            return len(d.names)-1
+        made = TS.add_tag_assault(d.t, tpl, finisher,
+            lambda i: d.names[d.t['moves'][i]['name']], string, finish_hit=('Zbr_3LPRP',))
+        return d, parent, finisher, made
+
+    def test_tagged_string_finisher_cannot_return_before_its_second_hit(self):
+        d, parent, finisher, made = self.reina_string()
+        _, twin, exit_move = made[0]
+        original = TS.cancels(d.t, d.t['moves'][finisher]['cancel'])[0]
+        self.assertEqual(original['win_start'], 1)
+        tagged = TS.cancels(d.t, d.t['moves'][twin]['cancel'])
+        self.assertEqual(tagged[0]['move_id'], exit_move)
+        self.assertTrue(TS.has(d.t, tagged[0]['req'], TS.ASSAULT_EXIT))
+        self.assertTrue(all(c['win_start'] > 23 for c in tagged[1:-1]))
+        self.assertEqual(d.t['moves'][twin]['first_active'], 22)
+
+    def test_two_plus_tag_keeps_string_timing_contact_and_ordinary_two(self):
+        d, parent, finisher, made = self.reina_string()
+        before = copy.deepcopy(TS.cancels(d.t, d.t['moves'][parent]['cancel']))
+        self.assertEqual(TS.add_tag_assault_strings(d.t, made, {parent: {finisher}}), 1)
+        rows = TS.cancels(d.t, d.t['moves'][parent]['cancel'])
+        self.assertEqual(rows[0]['button'], 0x40000102)
+        self.assertEqual(rows[0]['move_id'], made[0][1])
+        self.assertEqual((rows[0]['win_start'], rows[0]['win_end'], rows[0]['start_frame']), (1,20,15))
+        self.assertTrue(set(TS.reqs(d.t, before[0]['req'])) <= set(TS.reqs(d.t, rows[0]['req'])))
+        self.assertEqual(rows[1:], before)
+
+    def test_tag_string_rejects_a_missing_or_non_bound_finisher(self):
+        d, parent, finisher, made = self.reina_string()
+        with self.assertRaisesRegex(ValueError, 'no Tag Assault twin'):
+            TS.add_tag_assault_strings(d.t, [], {parent: {finisher}})
+        with self.assertRaisesRegex(ValueError, 'not found'):
+            TS.add_tag_assault_strings(d.t, made, {parent: {12345}})
+
     def test_no_triple(self):
         d = self.donor()
         for x in (1, 4):

@@ -470,6 +470,7 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
         log('         ' + s)
     step('moveset: %s\'s move names from TTT2\'s movesets' % d.NAME)
     ttt2_movesets = movenames.ttt2_movesets(archives)
+    movenames.name_known(k, [n.encode('ascii') for n in d.MOVESET.get('move_name_seeds', ())])
     movenames.name_moves(k, ttt2_movesets, log=sub)
     dictionary = movenames.harvest(ttt2_movesets)[0]
     others = []
@@ -532,9 +533,11 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
 
     step('command list')
     mvl = None
+    entries = {key: (hit, d.MOVESET['bounds'][name])
+               for key, (name, hit) in d.MOVESET.get('bound_entries', {}).items()}
     try:
         mvl = movelist8.convert(_read(files['mvl']), source.store, log=sub,
-                                bounds=move_overrides.command_bounds(c))     # the definition's bounds' icons
+                                bounds=move_overrides.command_bounds(c), bound_entries=entries)     # the definition's bounds' icons
     except (OSError, ValueError, KeyError, IndexError, struct.error) as error:
         sub('WARNING: the command list could not be converted (%s): Practice shows %s\'s' % (error, d.DONOR))
     if mvl is None:

@@ -267,7 +267,7 @@ def bound_hit(tornado, bounds, presses, command):
 
 
 # ---------------------------------------------------------------------------------------------------- converting
-def convert(mvl, store, log=print, texts_by_language=None, bounds=None):
+def convert(mvl, store, log=print, texts_by_language=None, bounds=None, bound_entries=None):
     """The TTT2 command list (MVLT bytes) of a Tekken 8 command list `mvl` (its saved bytes), its texts read from
     the store (or given: {language: {key: text}}); None when there is none to make. bounds: the definition's bound
     moves for the bound icons (bound_hit; move_overrides.command_bounds), None: Tekken 8's tornados only."""
@@ -330,6 +330,9 @@ def convert(mvl, store, log=print, texts_by_language=None, bounds=None):
         tornado = (x['icons'] >> 8) & 0xFF
         if bounds is not None and own and x['kind'] == KIND_MOVE:
             tornado = bound_hit(tornado, bounds, demo_presses(rows[0]), tables[ENGLISH].get(x['keys'][1]))
+        if bound_entries and x['keys'][0] in bound_entries and x['kind'] == KIND_MOVE:
+            hit, enabled = bound_entries[x['keys'][0]]
+            tornado = hit if enabled else 0
         out.append(dict(strings=strings, demo=first, count=len(own), kind=x['kind'], demo_kind=x['demo_kind'],
                         icons=(0, tornado << 8)))
     kept, dropped['empty title lines'] = drop_empty_titles(out)

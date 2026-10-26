@@ -306,7 +306,7 @@ def twin(x, tpl, kind):
     return out
 
 
-def add_tag_assault(tables, tpl, first, name_of, string):
+def add_tag_assault(tables, tpl, first, name_of, string, finish_hit=()):
     """Every converted bound move X (move index >= first: a 467 hit condition, no 468 one, no tag cancel, active from
     frame 2 on) gets TTT2's Tag Assault after `tpl` (assault_template): its tag row (in a new list: X's rows, the tag
     row, X's end row) into XT, appended with XDA. name_of(i): move i's name; string(s): the name's string offset.
@@ -352,8 +352,18 @@ def add_tag_assault(tables, tpl, first, name_of, string):
         # block, outside the active frames or under further conditions. Before it, a row taken on the hit (or on its
         # frame) would leave XT with the opponent bounced for the partner and the partner never coming in
         keep = [dict(c) for c in body if is_automatic(c)] if tpl['layout'] != 'alone' else []
-        first_ = [c for c in keep if row_kind(tables, c) in tpl['before']]
-        then = [c for c in keep if row_kind(tables, c) not in tpl['before']]
+        if name_of(i) in finish_hit:
+            # A T8 string finisher can have unconditional stance-property rows
+            # active from frame one. In its tagged twin they must not preempt
+            # the attack or native contact handoff. The untagged move is intact.
+            for c in keep:
+                c['win_start'] = max(c['win_start'], la + 1)
+            keep = [c for c in keep if c['win_start'] <= c['win_end']]
+            first_, then = [], keep
+        else:
+            first_ = [c for c in keep if row_kind(tables, c) in tpl['before']]
+            then = [c for c in keep if row_kind(tables, c) not in tpl['before']]
+
         xt['cancel'] = write(tables, 'cancels', first_ + [exit_] + then + [dict(end)])
         xda = twin(x, tpl, 'XDA')
         xda['name'] = name(name_of(i) + 'DA')
@@ -373,6 +383,41 @@ def add_tag_assault(tables, tpl, first, name_of, string):
         moves += [xt, xda]
         made.append((i, xt_i, xda_i))
     return made
+
+
+def add_tag_assault_strings(tables, made, routes):
+    """Opt-in string input + Tag -> the finisher's native Tag Assault twin.
+
+    Keep input timing/contact gates and the ordinary string row intact. A tag
+    pressed with the next attack otherwise fails that row's exact button mask.
+    Only explicit source/target pairs are changed; no generic extra cancels.
+    """
+    twins = {x: xt for x, xt, _ in made}
+    added = 0
+    for parent, targets in routes.items():
+        rows = cancels(tables, tables['moves'][parent]['cancel'])
+        out, found = [], set()
+        for row in rows:
+            target = row['move_id']
+            if target in targets:
+                if target not in twins:
+                    raise ValueError('string finisher has no Tag Assault twin')
+                button = row['button']
+                if not button & 0xf or button & ~0x4000000f:
+                    raise ValueError('unsupported Tag Assault string input mask')
+                tag = next(c for c in cancels(tables, tables['moves'][target]['cancel'])
+                           if c['button'] == TAG_BUTTON and c['move_id'] == twins[target])
+                conditions = reqs(tables, row['req'])
+                conditions += [x for x in reqs(tables, tag['req']) if x not in conditions]
+                guard = write(tables, 'requirements', [dict(condition=c, param=p) for c, p in conditions]
+                              + [dict(condition=TT_END, param=0)])
+                out.append(dict(row, button=button | 0x100, req=guard, move_id=twins[target]))
+                found.add(target); added += 1
+            out.append(dict(row))
+        if found != set(targets):
+            raise ValueError('Tag Assault string continuation was not found')
+        tables['moves'][parent]['cancel'] = write(tables, 'cancels', out)
+    return added
 
 
 # ------------------------------------------------------------------------------------------------ Tag Crash

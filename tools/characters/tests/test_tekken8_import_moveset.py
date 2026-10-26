@@ -356,7 +356,9 @@ class ConvertStep(unittest.TestCase):
         self.assertEqual(out, (b'moves', b'motions', b'<jun/> body', {'alo/x': b'fx'}, None))
         name_moves.assert_called_once()
         self.assertIs(name_moves.call_args[0][0], k)
-        name_known.assert_called_once_with(other, {b'Co_a'})
+        name_known.assert_has_calls([mock.call(k, [n.encode('ascii') for n in d.MOVESET['move_name_seeds']]),
+                                     mock.call(other, {b'Co_a'})])
+        self.assertEqual(name_known.call_count, 2)
         self.assertEqual(maps.call_args, mock.call([k], ttt2, references=[other]))
         args = Converter.call_args[0]
         self.assertEqual(args[:5], (k, None, 'row 42', ('data005', 42), 'row 13'))

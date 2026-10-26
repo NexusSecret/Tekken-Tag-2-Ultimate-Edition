@@ -3,6 +3,15 @@
 #include <string_view>
 
 namespace cafe::title::eliza_assist {
+// Opt in only the imported fighters with verified string/stance ownership.
+inline bool supported(std::string_view code) {
+    return code == "elz" || code == "mry" || code == "rei";
+}
+inline bool owns_move(std::string_view code, std::string_view name) {
+    return code == "elz" ? name.starts_with("Vp_") :
+           code == "mry" ? name.starts_with("My_") :
+           code == "rei" && name.starts_with("Zbr_");
+}
 // Protect stance selection and the first kick's string input window.
 // Committed finishers run through native inactive assist handling, allowing
 // the main fighter to act while their animations are still playing.
