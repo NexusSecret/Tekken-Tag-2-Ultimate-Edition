@@ -80,6 +80,7 @@ class Native(unittest.TestCase):
     def test_no_compiler(self):
         env = dict(os.environ)
         env.pop('CC', None)
+        env.pop('TTT2_HELPER_CC', None)
         env.pop('TTT2_NATIVE_ANSWER', None)
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(native.shutil, 'which',
                                                                             return_value=None):
