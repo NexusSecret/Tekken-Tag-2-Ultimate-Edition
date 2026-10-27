@@ -115,6 +115,9 @@ def main():
             if state['game'] and state['game'].poll() is None:
                 raise ValueError('Close the game before building, installing, or changing fighters.')
             save_paths()
+            if action == 'setup':
+                from setup_game import validate_setup_paths
+                validate_setup_paths(settings)
             if action in ('import', 'remove'): settings.import_command(names, action == 'remove')
             if action in ('install', 'update'): settings.installer_command(action == 'update')
             if action == 'remove' and not messagebox.askyesno('Remove fighters',
@@ -129,6 +132,7 @@ def main():
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             state['cancel'] = cancel
+            state['log'] = logfile
             output.delete('1.0', 'end'); status.set(action.capitalize() + ' running. Log: ' + str(logfile))
             for button in buttons: button.configure(state='disabled')
             cancel_button.configure(state='normal' if action in ('import', 'remove') else 'disabled')
@@ -231,6 +235,11 @@ def main():
             os.startfile(file)
         except Exception as error: show_error(error)
     settings_bar = ttk.Frame(display_tab); settings_bar.pack(anchor='w', pady=8)
+    def performance_preset():
+        resolution.set('1280x720')
+        display_values['interpolation'].set(False)
+        save_display()
+    button(settings_bar, '720p performance preset', performance_preset)
     button(settings_bar, 'Save display settings', save_display)
     button(settings_bar, 'Edit keyboard mappings', edit_keyboard)
 
@@ -245,6 +254,17 @@ def main():
     cancel_button = ttk.Button(bottom, text='Cancel import', command=cancel, state='disabled'); cancel_button.pack(side='left')
     def open_logs():
         folder = Path(settings.values['data']) / 'logs'; folder.mkdir(parents=True, exist_ok=True); os.startfile(folder)
+    def open_latest_log():
+        try:
+            logfile = state['log']
+            if not logfile:
+                folder = Path(settings.values['data']) / 'logs'
+                logs = list(folder.glob('*.log'))
+                if not logs: raise ValueError('No task logs yet. Run setup or an import first.')
+                logfile = max(logs, key=lambda path: path.stat().st_mtime)
+            os.startfile(logfile)
+        except Exception as error: show_error(error)
+    ttk.Button(bottom, text='Open latest log', command=open_latest_log).pack(side='right')
     ttk.Button(bottom, text='Open logs folder', command=open_logs).pack(side='right')
     def pump():
         try:
@@ -270,6 +290,11 @@ def main():
                     for key, value in settings.values.items(): fields[key].set(value)
                     status.set('Task complete.' if payload == 0 else 'Task stopped (code %s). See the saved log.' % payload)
                     refresh()
+                    if payload not in (0, 130):
+                        messagebox.showerror('Task failed',
+                            'The task could not finish. Your error details were saved to:\n\n' +
+                            str(state['log']) + '\n\nClick Open latest log below and send that file for help. '
+                            'After fixing the cause, run the task again; completed downloads are reused.', parent=window)
         except queue.Empty: pass
         window.after(100, pump)
     def close():

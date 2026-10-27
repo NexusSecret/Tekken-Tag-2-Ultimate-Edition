@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 import zipfile
 from backend import Settings
-from setup_game import download, unzip, verified_rpx, setup
+from setup_game import download, unzip, verified_rpx, setup, validate_setup_paths
 
 class FirstRun(unittest.TestCase):
     def setUp(self):
@@ -48,5 +48,43 @@ class FirstRun(unittest.TestCase):
         with mock.patch('setup_game.ensure_tools') as tools:
             with self.assertRaises(ValueError):setup(settings,mock.Mock())
             tools.assert_not_called()
+
+class PathPreflight(unittest.TestCase):
+    def settings(self, root='D:/TTT2', tools='D:/TTT2/local/windows-tools'):
+        from types import SimpleNamespace
+        return SimpleNamespace(root=root, values={'tools':tools})
+    def test_short_project_and_tools_are_accepted(self):
+        validate_setup_paths(self.settings())
+    def test_reported_nested_project_is_rejected_with_user_instructions(self):
+        root='D:/Nuova cartella/' + 'Tekken-Tag-2-Ultimate-Edition-codex-native-windows-t7-reina(1)/' + 'Tekken-Tag-2-Ultimate-Edition-codex-native-windows-t7-reina'
+        with self.assertRaisesRegex(ValueError, 'D:/TTT2'):
+            validate_setup_paths(self.settings(root))
+    def test_custom_tools_path_is_checked_separately(self):
+        with self.assertRaisesRegex(ValueError,'tools folder path'):
+            validate_setup_paths(self.settings(tools='D:/'+'x'*160))
+    def test_windows_utf16_length_is_used(self):
+        with self.assertRaisesRegex(ValueError,'project folder path'):
+            validate_setup_paths(self.settings(root='D:/'+'\U0001f600'*55))
+
+class DependencyCheckout(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        path=Path(__file__).resolve().parents[2]/'tools/setup_deps.py'
+        spec=importlib.util.spec_from_file_location('dependency_setup_tested',path)
+        cls.module=importlib.util.module_from_spec(spec);spec.loader.exec_module(cls.module)
+    def test_windows_git_gets_process_local_longpath_option(self):
+        with mock.patch.object(self.module.os,'name','nt'), mock.patch.object(self.module.subprocess,'run') as run:
+            self.module.git('dependency','status')
+            self.assertEqual(run.call_args.args[0][:5],['git','-c','core.longpaths=true','-C','dependency'])
+    def test_only_missing_files_are_restored(self):
+        from types import SimpleNamespace
+        with mock.patch.object(self.module.os,'name','nt'), mock.patch.object(self.module,'git',return_value=SimpleNamespace(stdout='source/missing header.h\0')) as git:
+            self.module.repair_missing_windows_files('dependency')
+            self.assertEqual(git.call_args_list[1].args,('dependency','restore','--source=HEAD','--worktree','--','source/missing header.h'))
+    def test_linux_checkout_behavior_is_unchanged(self):
+        with mock.patch.object(self.module.os,'name','posix'), mock.patch.object(self.module,'git') as git:
+            self.module.repair_missing_windows_files('dependency')
+            git.assert_not_called()
 
 if __name__=='__main__':unittest.main()

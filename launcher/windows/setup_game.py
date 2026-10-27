@@ -112,6 +112,26 @@ def prepare_rpx(settings, run):
     return destination
 
 
+# Conservatively bound paths before Git/CMake can leave an incomplete checkout.
+# Windows long-path support is not uniform across these independently built tools.
+MAX_PROJECT_PATH = 110
+MAX_TOOLS_PATH = 150
+
+def validate_setup_paths(settings):
+    def windows_length(path):
+        return len(str(path).encode('utf-16-le')) // 2
+    if windows_length(settings.root) > MAX_PROJECT_PATH:
+        raise ValueError(
+            'The extracted project folder path is too long for Windows build tools. '
+            'Extract a fresh copy into a short folder such as D:/TTT2 or C:/Games/TTT2 '
+            '(Start Ultimate Launcher.cmd must be directly inside that folder), then start setup again. '
+            'Your game archive does not need to move. Current project: ' + str(settings.root))
+    tools = settings.values.get('tools') or settings.root / 'local/windows-tools'
+    if windows_length(tools) > MAX_TOOLS_PATH:
+        raise ValueError('The Windows tools folder path is too long. Choose a shorter tools folder '
+                         'in Paths, or use a fresh project copy in D:/TTT2. Current tools: ' + str(tools))
+
+
 def setup(settings, run):
     # Refuse missing inputs before downloading large developer tools.
     source = settings.values['source'] or settings.values['title']
@@ -119,6 +139,7 @@ def setup(settings, run):
         raise ValueError('Choose your Wii U game source and installation folder first.')
     if settings.build != settings.root / 'build-windows-tools':
         raise ValueError('First-time setup requires the project build-windows-tools folder.')
+    validate_setup_paths(settings)
     print('@step tools Getting the missing Windows tools ready', flush=True)
     tools = ensure_tools(settings, run)
     print('@step dependencies Preparing graphics libraries', flush=True)
