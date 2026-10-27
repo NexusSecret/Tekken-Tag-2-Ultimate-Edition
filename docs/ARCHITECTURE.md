@@ -610,7 +610,11 @@ the grid has only while a fighter's place is past those 19 cells: the
 cursor's place on the screen is computed from the column and row
 (`sub_06F4D7B8`: 48 pixels a column, 65 a row, both signed; nothing else
 reads them), and the importer puts each cell's picture in the grid's
-layouts at its column and row. For the new row the importer moves the
+layouts at its column and row: a copy of a row-1 panel, whose card sits
+6 units above its place where a top-row panel's sits on it (so a cell in
+the top row is placed that much lower), drawn after the panels of its
+row and the rows above (each row's panels cover the bottom of the row
+above them). For the new row the importer moves the
 title's three rows (and the band under them) down a row into the space
 under the grid, stretches the '?' panel over four rows and drops the
 "CHOOSE YOUR CHARACTER" banner (`art.four_rows`; the new row's empty cells

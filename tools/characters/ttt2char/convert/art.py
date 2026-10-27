@@ -50,19 +50,19 @@ from ..ttt2.archive import key_of
 PAUL = 'pau'                      # UI position 0: the runtime shows the added fighter in Paul's place
 LAYOUTS = 'data007'               # the 2D layouts (LMB), each followed by its texture container (NTP3)
 # The select grids' new cells (roster.cpp kCells, pack.place): at a fighter's panel (`anchor`) moved some columns
-# over (the columns' pitch: between the panels of PITCH_FROM), in the top row (the height of GRID_BESIDE's panel),
-# rows above it (the rows' pitch: between the panels of ROW_PITCH_FROM, the cursor's 65 (sub_06F4D7B8); the top row
-# is 70 above row 1, and the cursor 5 below it, as on the rows above) or the anchor's own row.
+# over (the columns' pitch: between the panels of PITCH_FROM), in the top row (with its card frame where
+# GRID_BESIDE's panel has its: the top row's panels draw their card at their place, the other rows' 6 higher), a row
+# above it (the rows' pitch: between the panels of ROW_PITCH_FROM, the cursor's 65, sub_06F4D7B8) or the anchor's own
+# row; drawn in the rows' order (each row over the one above it, as the title's are).
 GRID_BESIDE = 'vio'
 PITCH_FROM = ('rog', 'rav')       # grid row 1, columns 0 and 1
 ROW_PITCH_FROM = ('rog', 'mok')   # column 0, grid rows 1 and 2
 # The select grid with a new top row (when a fighter's place is past pack.CELLS): grid row -1 for added fighters where
 # the title's top row is, under the team bars (its empty cells show the background); the title's three rows move down
-# a row into the space under the grid (ROWS_DOWN; the title's top row 5 more: on the cursor's pitch now, 65 above row
-# 1, the new row 70 above it as the title's top row is; roster.cpp kRowsCursorRow: the cursor's row 1 follows them),
-# and what is under the grid with them; the '?'
-# panel is stretched over the four rows; the banner under the grid is left out (the button guide moves down where it
-# was: roster.cpp kRowsGuideDown). The portraits, team bars and dialogs stay. Layout units: 720p pixels, y down.
+# a row into the space under the grid (ROWS_DOWN; roster.cpp kRowsCursorRow: the cursor's row 1 follows them), and
+# what is under the grid with them; the '?' panel is stretched down over the four rows; the banner under the grid is
+# left out (the button guide moves down where it was: roster.cpp kRowsGuideDown). The grid's top line, the portraits,
+# team bars and dialogs stay. Layout units: 720p pixels, y down.
 # Only the select's frames change (the stage select uses the same sprite from STAGE_LABEL on).
 ROWS_DOWN = 65
 STAGE_LABEL, OUT_LABEL = 'stage_in', 'face_all_out'     # (the select rests at OUT_LABEL; the faces go out after it,
@@ -699,21 +699,26 @@ class Layout:
                 mine = self.sources.framed(face_place(*size), size[0], size[1])
                 ok = stack is not None and stack.shape[1:3] == (size[1], size[0])
                 char_map[shape.id] = self.new_shape(shape, compose(stack, mine) if ok else mine)
-        sid = lm.take_id(below=grid.id, above=max(panel.id, max(char_map.values())))
-        lm.clone_sprite(panel.id, sid, char_map)
-        # in the grid: everything the panel below does, at a new depth after the panels, in the top row
-        panels = [c.depth for _, c in grid.all_children() if isinstance(c, lmb.Place) and c.mode == lmb.MODE_PLACE
-                  and c.name and lm.symbols[c.name].startswith('face_panel_')]
-        depth = max(panels) + 1
-        lm.insert_depth(grid, depth)
-        xs = [lm.matrices[p[0][2].posid][4] if p[0][2].posflags == lmb.POS_MATRIX else None for p in pitch]
-        top = lm.matrices[beside[0][2].posid][5] if beside[0][2].posflags == lmb.POS_MATRIX else None
-        ys = [lm.matrices[r[0][2].posid][5] if r[0][2].posflags == lmb.POS_MATRIX else None for r in rows]
+        xs = [_place_xy(lm, p[0][2])[0] for p in pitch]
+        top = _place_xy(lm, beside[0][2])[1]
+        ys = [_place_xy(lm, r[0][2])[1] for r in rows]
         if top is None or None in xs or None in ys:
             return
+        sid = lm.take_id(below=grid.id, above=max(panel.id, max(char_map.values())))
+        lm.clone_sprite(panel.id, sid, char_map)
         dx = (xs[1] - xs[0]) * self.cell['columns']
         in_top = self.cell['grid_row'] <= 0
-        y = top + (ys[1] - ys[0]) * self.cell['grid_row']  # (above the top row: rows' pitches higher)
+        row_pitch = ys[1] - ys[0]
+        # (the top row's card frame where the top row has its; above it: rows' pitches higher)
+        y = top + _card_offset(lm, panel, other) + row_pitch * self.cell['grid_row'] if in_top \
+            else _place_xy(lm, place)[1]
+        # in the grid: everything the panel below does, at a new depth after the panels of its row and the rows
+        # above it (a row's panels draw over the row above them)
+        panels = [(c.depth, _place_xy(lm, c)[1]) for _, c in grid.all_children() if isinstance(c, lmb.Place)
+                  and c.mode == lmb.MODE_PLACE and c.name and lm.symbols[c.name].startswith('face_panel_')]
+        above = [d for d, py in panels if py is not None and py <= y + row_pitch / 2]
+        depth = max(above) + 1 if above else min(d for d, _ in panels)
+        lm.insert_depth(grid, depth)
 
         def to_cell(m):
             m[4] += dx
@@ -799,16 +804,14 @@ def four_rows(lm):
         hit = lm.find_named(name)
         return lm.matrices[hit[0][2].posid][5] if hit and hit[0][2].posflags == lmb.POS_MATRIX else None
 
-    top, row1, row2 = (y_of('face_panel_' + c) for c in (GRID_BESIDE,) + ROW_PITCH_FROM)
     hit = lm.find_named('face_panel_' + ROW_PITCH_FROM[0])
-    if not hit or None in (top, row1, row2):
+    random = lm.find_named('random_face_panel')
+    if not hit or not random or None in _place_xy(lm, random[0][2]):
         return False
     grid = hit[0][0]
-    pitch, top_gap = row2 - row1, row1 - top
-    top_down = ROWS_DOWN + top_gap - pitch                  # the title's top row: on the cursor's pitch
-    rows = {top - pitch: ROWS_DOWN, top: top_down, row1: ROWS_DOWN, row2: ROWS_DOWN}    # (add_cell's row -1 first)
-    old = (top - top_gap / 2, row2 + pitch / 2)             # the four rows' span, from the three rows'
-    new = (old[0] + top_down - top_gap, old[1] + ROWS_DOWN)
+    y0, y1 = _y_extent(lm, random[0][2].char)
+    old = (_place_xy(lm, random[0][2])[1] + y0, _place_xy(lm, random[0][2])[1] + y1)   # the '?' panel: three rows
+    new = (old[0], old[1] + ROWS_DOWN)                                                 # four
     scale = (new[1] - new[0]) / (old[1] - old[0])
     line = y_of('face_waku_up_line_2')
     labels = lm.labels_of(grid)
@@ -821,9 +824,9 @@ def four_rows(lm):
         if not name and index >= out:
             return None                                     # (the stage cards coming in)
         if name.startswith('face_panel_'):
-            return 'dy', rows[min(rows, key=lambda r: abs(r - y))]
+            return 'dy', ROWS_DOWN
         if GRID_LINE.match(name) or (not name and line is not None and abs(y - line) <= 3):
-            return 'dy', top_down - top_gap
+            return None                                     # (the new row is where the top row was)
         if RANDOM_PANEL.match(name) or (not name and old[0] <= y <= old[1]
                                         and _height(lm, c.char) >= 0.8 * (old[1] - old[0])):
             return ('stretch',)                             # the '?' panel, the grid's end caps
@@ -831,12 +834,8 @@ def four_rows(lm):
             return 'dy', 1000.0
         if name in UNDER_LINE:
             return 'dy', ROWS_DOWN
-        if name in SPACERS:
-            return 'dy', top_down
-        if not name and old[0] <= y <= old[1]:              # the cells' flashes as the grid comes in
-            return 'dy', rows[min(rows, key=lambda r: abs(r - y))]
-        if not name and y > old[1]:                         # the band under the grid
-            return 'dy', ROWS_DOWN
+        if name in SPACERS or (not name and y >= old[0]):  # (the cells' flashes as the grid comes in, the band
+            return 'dy', ROWS_DOWN                          # under the grid)
         return None
 
     def position(c):
@@ -892,17 +891,53 @@ def four_rows(lm):
     return True
 
 
-def _height(lm, cid, depth=0):
-    """How tall character cid is (its first frame's shapes, through its sprites)."""
+def _place_xy(lm, c):
+    """Where placement c puts its object: (x, y), or (None, None)."""
+    if c.posflags == lmb.POS_MATRIX:
+        return tuple(lm.matrices[c.posid][4:6])
+    if c.posflags == lmb.POS_POSITION:
+        return tuple(lm.positions[c.posid][:2])
+    return None, None
+
+
+def _y_extent(lm, cid, depth=0):
+    """(top, bottom) of character cid (its first frame's shapes, through its sprites; (0, 0) for nothing)."""
     ch = lm.char(cid)
     if isinstance(ch, lmb.Shape):
         boxes = [g.xy_box() for g in ch.graphics]
-        return max(b[3] for b in boxes) - min(b[1] for b in boxes) if boxes else 0.0
+        return (min(b[1] for b in boxes), max(b[3] for b in boxes)) if boxes else (0.0, 0.0)
     if not isinstance(ch, lmb.Sprite) or not ch.frames or depth > 8:
-        return 0.0
-    heights = [_height(lm, c.char, depth + 1) * (abs(lm.matrices[c.posid][3]) if c.posflags == lmb.POS_MATRIX else 1)
-               for c in ch.frames[0].children if isinstance(c, lmb.Place) and c.mode == lmb.MODE_PLACE]
-    return max(heights, default=0.0)
+        return 0.0, 0.0
+    ends = []
+    for c in ch.frames[0].children:
+        if isinstance(c, lmb.Place) and c.mode == lmb.MODE_PLACE:
+            top, bottom = _y_extent(lm, c.char, depth + 1)
+            scale = lm.matrices[c.posid][3] if c.posflags == lmb.POS_MATRIX else 1.0
+            y = _place_xy(lm, c)[1] or 0.0
+            ends += [y + top * scale, y + bottom * scale]
+    return (min(ends), max(ends)) if ends else (0.0, 0.0)
+
+
+def _height(lm, cid):
+    """How tall character cid is."""
+    top, bottom = _y_extent(lm, cid)
+    return abs(bottom - top)
+
+
+def _card_offset(lm, panel, other):
+    """How much lower panel sprite `panel` must be placed for the card frame it shares with sprite `other` (a
+    character both show, in any of their frames: their labels differ in order) to be where `other` has it (0 when
+    they share none)."""
+    def places(sprite):
+        out = {}
+        for f in sorted(sprite.frames, key=lambda f: f.index):
+            for c in f.children:
+                if isinstance(c, lmb.Place) and c.mode == lmb.MODE_PLACE and _place_xy(lm, c)[1] is not None:
+                    out.setdefault(c.char, _place_xy(lm, c)[1])
+        return out
+    mine, theirs = places(panel), places(other)
+    common = [cid for cid in mine if cid in theirs]
+    return theirs[common[0]] - mine[common[0]] if common else 0.0
 
 
 # ------------------------------------------------------------------------------------------------ portraits
