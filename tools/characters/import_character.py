@@ -238,10 +238,15 @@ def add(args, fighters, progress):
             progress.fail(str(error))
         slot = int(pack.read_ini(os.path.join(target, 'character.ini')).get('slot', '0'))
         cell = pack.place(slot)
-        rows = ('top', 'middle', 'bottom')
-        where = ('a cell at the %s end of the select screen\'s %s row' % ('left' if cell['column'] < 10 else 'right',
-                                                                         rows[cell['grid_row']])
-                 if cell['column'] is not None else 'no cell (the select screen is full)')
+        if cell['column'] is None:
+            where = 'no cell (the select screen is full)'
+        else:
+            side = 'left' if cell['column'] < 11 else 'right'   # (of the '?' column)
+            if cell['grid_row'] < 0:
+                where = 'a cell in the %s half of the select screen\'s new top row' % side
+            else:
+                where = 'a cell at the %s end of the select screen\'s %s row' % (
+                    side, ('top', 'middle', 'bottom')[cell['grid_row']])
         print('Done: %s has %s.' % (fighter, where))
         progress('added', fighter)
         if fighter in tekken8_fighters and pack.read_ini(os.path.join(target, 'character.ini')).get('stand_in'):

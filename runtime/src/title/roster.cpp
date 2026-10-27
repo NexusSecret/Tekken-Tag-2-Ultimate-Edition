@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -71,7 +72,11 @@ constexpr uint32_t kUiPosition = 59;           // an added fighter's records: af
 // * a select grid cell (62 + k, over the unused grid 2): the free ends of
 //   the top row (kCells: right of Eddy's column, then left, alternately),
 //   then columns beyond the grid's ends (the cursor's place is computed from
-//   the column, so -1 and 23 are left and right of the rows' ends);
+//   the signed column and row, so -1 and 23 are left and right of the rows'
+//   ends), then a new top row over the title's three (kRowCells, row -1,
+//   from the centre out), which the grid has only while a fighter needs it
+//   (the shared layouts move the grid down for it and shared/grid.ini says
+//   so);
 // * one sound bank (its shouts, then its win quotes) under one of the four
 //   bank ids no bank has, bound when a match loads it (a tag match has four
 //   fighters at most).
@@ -80,15 +85,32 @@ constexpr uint32_t kFirstAddedRecord = 140;
 constexpr uint32_t kDirectRows[] = {58, 64, 61, 62, 65};
 constexpr uint32_t kSpareRow = 63, kFirstVirtualRow = 69;
 struct GridPlace {
-    int32_t column;
-    uint32_t row;
+    int32_t column, row;
 };
-constexpr GridPlace kCells[] = {{19, 0}, {2, 0}, {20, 0}, {1, 0},  {21, 0}, {0, 0},  {22, 0},
+constexpr GridPlace kCells[] = {{19, 0}, {2, 0},  {20, 0}, {1, 0},  {21, 0}, {0, 0},  {22, 0},
                                 {23, 0}, {-1, 0}, {23, 1}, {-1, 1}, {23, 2}, {-1, 2}, {24, 1},
                                 {-2, 1}, {24, 2}, {-2, 2}, {24, 0}, {-2, 0}}; // pack.py CELLS
+constexpr GridPlace kRowCells[] = {{12, -1}, {10, -1}, {13, -1}, {9, -1}, {14, -1}, {8, -1},  {15, -1},
+                                   {7, -1},  {16, -1}, {6, -1},  {17, -1}, {5, -1}, {18, -1}, {4, -1},
+                                   {19, -1}, {3, -1},  {20, -1}, {2, -1},  {21, -1}, {1, -1}, {22, -1},
+                                   {0, -1},  {23, -1}, {-1, -1}, {24, -1}, {-2, -1}}; // pack.py ROW_CELLS
+// With the new top row: the '?' cell (random) moves up into it, the
+// cursor's place of row 1 (sub_06F4D7B8: row 1 at this, 65 a row) follows
+// the rows the layouts moved down (art.py ROWS_DOWN), and so does the
+// button guide while the grid is shown (see sub_04DC933C).
+constexpr uint32_t kRandomCell = 54, kCursorRowOne = 0x10531388;
+constexpr float kRowsCursorRow = 148.0f + 65.0f;
+bool g_grid_rows = false;       // shared/grid.ini `grid = rows`: the grid with the new top row
 constexpr uint32_t kFirstAddedCell = 62;
 constexpr uint32_t kSpacers[2] = {0x1053138C, 0x105314CC}; // the grilles over the top row's ends: left, right
 constexpr uint32_t kFreeBanks[] = {1, 122, 233, 253};
+
+std::optional<GridPlace> cell_of(size_t k) {
+    if (k < std::size(kCells)) return kCells[k];
+    k -= std::size(kCells);
+    if (g_grid_rows && k < std::size(kRowCells)) return kRowCells[k];
+    return std::nullopt;
+}
 
 uint32_t row_of(size_t k) {
     return k < std::size(kDirectRows) ? kDirectRows[k]
@@ -208,7 +230,7 @@ struct Added {
     uint32_t id = 0, records[2] = {0, 0}, row = 0;
     uint32_t cell = 0;              // its select grid cell (0: none)
     int32_t column = 0;             // and the cell's column and row
-    uint32_t grid_row = 0;
+    int32_t grid_row = 0;
     uint32_t donor = 0, donor_row = 0; // the donor's select id and motion row
     bool female = true;
     std::string code;
@@ -882,18 +904,24 @@ void patch_title(size_t k) {
 // nothing moves to.
 void place_cells() {
     struct Cell {
-        int32_t column;
-        uint32_t row, cell;
+        int32_t column, row;
+        uint32_t cell;
         bool operator<(const Cell& o) const { return std::tie(column, row) < std::tie(o.column, o.row); }
     };
+    if (g_grid_rows && load(kGrid + 32 * kRandomCell + kCellId) == 63 &&
+        load(kGrid + 32 * kRandomCell + kCellColumn) == 11) {
+        store(kGrid + 32 * kRandomCell + kCellRow, static_cast<uint32_t>(-1));
+        store(kCursorRowOne, std::bit_cast<uint32_t>(kRowsCursorRow));
+    }
     std::vector<Cell> cells;
     for (uint32_t c = 0; c < kTitleCells; ++c) {
-        cells.push_back({static_cast<int32_t>(load(kGrid + 32 * c + kCellColumn)), load(kGrid + 32 * c + kCellRow), c});
+        cells.push_back({static_cast<int32_t>(load(kGrid + 32 * c + kCellColumn)),
+                         static_cast<int32_t>(load(kGrid + 32 * c + kCellRow)), c});
     }
     uint32_t last = 0;
     for (size_t k = 0; k < g_added.size(); ++k) {
         const Added& added = g_added[k];
-        if (k >= std::size(kCells)) break;
+        if (!cell_of(k)) break;
         const uint32_t cell = kFirstAddedCell + static_cast<uint32_t>(k), at = kGrid + 32 * cell;
         last = std::max(last, cell);
         if (!added.active || added.cell == 0) {
@@ -903,7 +931,7 @@ void place_cells() {
         }
         store(at + kCellId, added.id);
         store(at + kCellColumn, static_cast<uint32_t>(added.column));
-        store(at + kCellRow, added.grid_row);
+        store(at + kCellRow, static_cast<uint32_t>(added.grid_row));
         cells.push_back({added.column, added.grid_row, cell});
     }
     if (last == 0) return;
@@ -1230,6 +1258,16 @@ void prepare_roster() {
         }
     }
     std::sort(candidates.begin(), candidates.end());
+    {
+        std::ifstream grid(directory / "shared" / "grid.ini");
+        for (std::string line; std::getline(grid, line);) {
+            line = line.substr(0, line.find('#'));
+            const size_t equals = line.find('=');
+            if (equals != std::string::npos && trim(line.substr(0, equals)) == "grid") {
+                g_grid_rows = trim(line.substr(equals + 1)) == "rows";
+            }
+        }
+    }
     // Numbers: the one a pack names (the importer's choice, which the shared pictures follow), else the first free.
     // Packs of another format keep theirs (the importer's pack.places_of counts them too), unloaded.
     std::vector<Pack> packs;
@@ -1340,10 +1378,10 @@ void prepare_roster() {
         }
         added.code_string = guest_string(pack.code);
         added.active = true;
-        if (k < std::size(kCells)) {
+        if (const auto place = cell_of(k)) {
             added.cell = kFirstAddedCell + static_cast<uint32_t>(k);
-            added.column = kCells[k].column;
-            added.grid_row = kCells[k].row;
+            added.column = place->column;
+            added.grid_row = place->row;
         } else {
             std::fprintf(stderr, "ttt2: warning: %s: no free cell left in the select grid\n", pack.directory.c_str());
         }
@@ -2589,12 +2627,63 @@ PPC_FUNC(sub_07A5D01C) {
     sub_07A5D01C_orig(ctx, base);
 }
 
+// The button guide (the one object every menu shows, made at start-up:
+// placed by sub_04DC6A48 from kGuidePlace, r3 the guide, x r4, y r5 from the
+// screen's bottom), with the new top row: in the banner's place under the
+// grid while the grid is shown (sub_06F4D7B8 runs every frame then), where
+// the title put it elsewhere. sub_04DC933C runs for it every frame;
+// sub_04DC35F0 (its class's method 148) places it (r3, x r4, y r5, r6 0).
+constexpr uint32_t kGuidePlace = 0x0581F874;
+constexpr int32_t kRowsGuideDown = 40;
+constexpr uint32_t kGuideFramesShown = 3; // the grid's frames end this many guide frames after its last
+struct Guide {
+    uint32_t object = 0;
+    int32_t x = 0, y = 0;
+    bool moved = false;
+    uint32_t frames = 0, grid_frame = 0; // its frames, and the one of the grid's last
+    bool grid_seen = false;
+};
+Guide g_guide;
+
+void note_select_frame() {
+    g_guide.grid_frame = g_guide.frames;
+    g_guide.grid_seen = true;
+}
+
+PPC_FUNC(sub_04DC6A48_orig);
+PPC_FUNC(sub_04DC6A48) {
+    if (ctx.lr == kGuidePlace) {
+        g_guide.object = ctx.r[3];
+        g_guide.x = static_cast<int32_t>(ctx.r[4]);
+        g_guide.y = static_cast<int32_t>(ctx.r[5]);
+        g_guide.moved = false;
+    }
+    sub_04DC6A48_orig(ctx, base);
+}
+
+PPC_FUNC(sub_04DC35F0);
+PPC_FUNC(sub_04DC933C_orig);
+PPC_FUNC(sub_04DC933C) {
+    if (g_grid_rows && g_guide.object && ctx.r[3] == g_guide.object) {
+        ++g_guide.frames;
+        const bool shown = g_guide.grid_seen && g_guide.frames - g_guide.grid_frame <= kGuideFramesShown;
+        if (shown != g_guide.moved) {
+            g_guide.moved = shown;
+            const int32_t y = g_guide.y + (shown ? kRowsGuideDown : 0);
+            guest_call(ctx, base, sub_04DC35F0,
+                       {g_guide.object, static_cast<uint32_t>(g_guide.x), static_cast<uint32_t>(y), 0});
+        }
+    }
+    sub_04DC933C_orig(ctx, base);
+}
+
 // Shows the select grid's portraits and the grilles over its empty ends;
 // the grilles over the added fighters' cells are hidden again after every
 // call.
 PPC_FUNC(sub_06EF9C4C);
 PPC_FUNC(sub_06F4D7B8_orig);
 PPC_FUNC(sub_06F4D7B8) {
+    note_select_frame();
     const uint32_t ui = ctx.r[3];
     sub_06F4D7B8_orig(ctx, base);
     bool ends[2] = {false, false}; // added cells at the left end, the right end

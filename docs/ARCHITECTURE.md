@@ -604,11 +604,22 @@ keys of its body files and part packs by type) and chara master
 cells the cursor moves to, column and row) has 62 cells; it grows over the
 following, unused grid of the PlayStation 3's smaller roster. The added
 cells sit at the free ends of the top row (columns 0-2 and 19-22), then in
-new columns beyond the rows' ends (-1 and 23, then -2 and 24): the cursor's
-place on the screen is computed from the column (`sub_06F4D7B8`: 48 pixels
-a column, signed), and the importer puts each cell's picture in the grid's
-layouts at its column. Every row is a ring left and right and every column
-a ring up and down, in column and row order, as the title's own cells are
+new columns beyond the rows' ends (-1 and 23, then -2 and 24), then in
+a new top row (row -1, from the '?' column outwards; `kRowCells`), which
+the grid has only while a fighter's place is past those 19 cells: the
+cursor's place on the screen is computed from the column and row
+(`sub_06F4D7B8`: 48 pixels a column, 65 a row, both signed; nothing else
+reads them), and the importer puts each cell's picture in the grid's
+layouts at its column and row. For the new row the importer moves the
+title's three rows (and the band under them) down a row into the space
+under the grid, stretches the '?' panel over four rows and drops the
+"CHOOSE YOUR CHARACTER" banner (`art.four_rows`; the new row's empty cells
+show the background); `shared/grid.ini` (`grid = rows`) tells the port,
+which then moves the '?' cell up, the cursor's row 1 down 65
+(`0x10531388`) and the button guide (one object every menu shares, placed
+by `sub_04DC6A48`) down 40 while the grid is on screen. Every row is a
+ring left and right and every column a ring up and down, in column and
+row order, as the title's own cells are
 (rebuilt from the cells' columns and rows, this reproduces the title's
 links exactly). A slot with no fighter has a random cell nothing moves to;
 the grilles over the top row's ends are hidden where a cell sits.
