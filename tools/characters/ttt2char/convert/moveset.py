@@ -394,6 +394,15 @@ ANIM_COMMON, ANIM_PACK = 0x8000, 0x4000
 DROP_MOVES = r'RageArts|_EX\d?$|^b7_|^vra_|_7CS$|^Story|^FACE'
 # Tekken 7 generic moves (also Heihachi's, not in TTT2) converted when a reaction needs them, except these
 DROP_T_RE = re.compile(r'Balcony|_RA$|RAtk|RageArt|^vra_|_7CS$|^SE_|^FACE|Story|^b7_')
+# A reaction move the donor has no move of its own for takes the TTT2 move the evidence puts in its place
+# (idmaps.reaction_remap). For Tekken 8 that evidence can be one move whose effect changed between the games, counted
+# once per reaction slot (Azucena's Libertador 1 staggers in Tekken 8, sDm_KAOLee, 8 of the 28+ pairs said TTT2's
+# knock-down sDw_KAO00_; Libertador 2's stagger into a crouch, #405, became the launch sDw_UP_11_): a Tekken 8
+# reaction that keeps the opponent on its feet (REST: its transitions come to rest standing or crouching, none of them
+# airborne) does not take a TTT2 move that knocks down or launches; Tekken 8's own reaction is converted instead (its
+# class T or N move, its animation). Air, down and wall reactions keep TTT2's (its bounds and Tag Crash need them).
+REST = (('stand', re.compile(r'sKAM00_$')), ('crouch', re.compile(r'^cKAM')), ('down', re.compile(r'^d(w|Dw)')))
+REST_STEPS = 12                   # transitions followed at most
 ANIM_KEY_BYTES = 256                 # animations are matched by a hash of their first bytes
 
 
@@ -700,7 +709,9 @@ class Converter:
         if n in self.dn:
             return self.dn[n]
         r = self.react_remap.get(n)
-        if r and r in self.dn:
+        if r and r in self.dn and self.game == 't8' and self.fells(mid, self.dn[r]):
+            self.stats['reaction remap refused (a Tekken 8 stagger, the TTT2 move fells)'] += 1
+        elif r and r in self.dn:
             self.stats['target remapped (Tekken 7-only move -> the TTT2 move in its place)'] += 1
             return self.dn[r]
         # Shared attacks (FC jabs/kicks, jump attacks, throw follow-ups) can be absent from the donor too.
@@ -751,6 +762,31 @@ class Converter:
                     todo += [k.resolve_alias(x['move_id']) for x in rows if x['button'] == 0]
             self._reachable = seen
         return self._reachable
+
+    @staticmethod
+    def rest(m, i, name):
+        """How move i of moveset m (name: its names) ends: (REST kind, whether a move on the way is airborne), or None
+        when its transitions reach none of REST's within REST_STEPS."""
+        air, seen = False, set()
+        for _ in range(REST_STEPS):
+            if i is None or i in seen or not 0 <= i < len(m.tables['moves']):
+                return None
+            seen.add(i)
+            for kind, pattern in REST:
+                if pattern.search(name(i)):
+                    return kind, air
+            mv = m.tables['moves'][i]
+            air = air or mv['airborne_start'] > 0
+            t = mv['transition']
+            i = m.resolve_alias(t) if t >= 0x8000 else t
+        return None
+
+    def fells(self, mid, j):
+        """Tekken 8 reaction mid keeps the opponent on its feet (rest(): standing or crouching, never airborne) where
+        the donor's move j knocks it down or launches it (unknown counts as not)."""
+        a, b = self.rest(self.k, mid, self.name), self.rest(self.d, j, self.d.move_name)
+        return (a is not None and b is not None and a[0] in ('stand', 'crouch') and not a[1]
+                and (b[0] == 'down' or b[1]))
 
     def is_state(self, i):
         """Tekken 7 move i is a movement state TTT2 lets a fighter tag out of (by TTT2's own movesets' move names,
