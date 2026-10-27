@@ -23,6 +23,8 @@ MOVESET_SOURCE = 'tekken8'
 # update the helper does not know yet): the TTT2 fighter (code, motion row) whose moveset she fights with instead,
 # as it is (MOVESET_SOURCE 'donor'), the donor of everything then (importer.with_stand_in)
 STAND_IN = ('hei', 13)        # Heihachi Mishima
+# what packs of her made before lack (pack.revision; the launcher shows "Update ready"): 1: her bounds
+REVISION = 1
 
 # ------------------------------------------------------------------------------------------------ model
 # her Tekken 8 costumes: the CustomizeSet CS_cat_<name> (tekken8/costume.py: its meshes, their merge order and the
@@ -93,6 +95,11 @@ MOVESET = {
     'direct': [(r'^Ju_sKAM00_$', 'move', ['Cat_sKAM00_']),                      # Jun's stance -> hers
                (r'^(ju|mk)_s', 'anim', ['cat_s%02d' % k for k in range(3)]),    # intros
                (r'^ju_w', 'anim', ['cat_w%02d' % k for k in range(3)])],        # win poses
-    # no TTT2 bounds yet (Tekken 8 has none, and her tornados do not become any): the moves that bound go in a
-    # 'bounds' {move name: True} list (convert/move_overrides.py) once chosen
+    # TTT2 bounds (Tekken 8 has none, and her tornados do not become any): an air hit slams the opponent into the
+    # floor once per juggle (convert/move_overrides.py). d+1 Hand Drip Hammer, d/f+1,4,1~2's last hit (Full Body
+    # Grande Combo), Libertador 3,1's 1 (Blend Reganar), Libertador 4,2's 2 (Blend Martillo), u/f+4 Tacones Drip,
+    # u/f+3+4's second kick (Ortiz Molino: #1620 kicks first) and f,f+4 Demitasse Molino. (Moves no name is known
+    # for are '#<index>', 'Cat_#<index>' in her TTT2 moveset: indices of the game build the names were read from.)
+    'bounds': {'Cat_t_slp00': True, '#1807': True, '#1677': True, '#1696': True, 'Cat_jprk00F': True,
+               '#1621': True, 'Cat_66rk': True},
 }
