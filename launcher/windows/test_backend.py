@@ -1,6 +1,8 @@
 """Contract tests for launcher paths and actual backend command arguments."""
 from pathlib import Path
 import os
+import sys
+from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest import mock
@@ -68,5 +70,42 @@ class LauncherBackend(unittest.TestCase):
         with self.assertRaises(ValueError):self.settings.installer_command(True)
         folder.mkdir();(folder/'.ttt2-install').touch()
         self.assertEqual(self.settings.installer_command(True),[str(exe),'--update',str(folder)])
+
+class T8Extraction(unittest.TestCase):
+    def extract(self, names, complete=True):
+        from backend import worker
+        from ttt2char.tekken8 import autodump as t8
+        settings = mock.Mock()
+        settings.root = Path(__file__).resolve().parents[2]
+        settings.values = {'tools': str(settings.root / 'local/windows-tools')}
+        settings.environment.return_value = {}
+        settings.import_command.return_value = ['python', '-u', 'import_character.py', *names]
+        game = SimpleNamespace(game='fake-game', library='fake-library')
+        with mock.patch.object(t8, 'find_tekken8', return_value=game), \
+             mock.patch.object(t8, 'dump') as dump, \
+             mock.patch.object(t8, 'game_version', return_value='test'), \
+             mock.patch.object(t8, 'saved_files', return_value=[]) as saved, \
+             mock.patch.object(t8, 'whole', return_value=complete), \
+             mock.patch('runpy.run_path') as run, \
+             mock.patch.object(sys, 'argv', sys.argv[:]), \
+             mock.patch.object(sys, 'path', sys.path[:]):
+            if complete:
+                worker(settings, 'import', names)
+                run.assert_called_once()
+            else:
+                with self.assertRaisesRegex(RuntimeError, 'Azucena extraction is incomplete'):
+                    worker(settings, 'import', names)
+                run.assert_not_called()
+            return dump.call_args, saved.call_args_list
+
+    def test_azucena_and_reina_are_extracted_together(self):
+        call, saved = self.extract(['azucena', 'reina'])
+        self.assertEqual(call.args, ([29, 28],))
+        self.assertNotIn(29, call.kwargs['references'])
+        self.assertNotIn(28, call.kwargs['references'])
+        self.assertEqual([c.args[0] for c in saved], ['cat', 'zbr'])
+
+    def test_incomplete_azucena_does_not_start_import(self):
+        self.extract(['azucena'], complete=False)
 
 if __name__=='__main__':unittest.main()

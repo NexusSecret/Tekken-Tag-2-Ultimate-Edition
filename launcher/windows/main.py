@@ -180,7 +180,7 @@ def main():
     button(row, 'Import / Update selected', lambda: start('import', tree.selection()))
     button(row, 'Remove selected', lambda: start('remove', tree.selection()))
     button(row, 'Select Tekken 7', lambda: tree.selection_set([n for n in tree.get_children() if tree.set(n, 'game') == 'Tekken 7']))
-    button(row, 'Select Reina', lambda: tree.selection_set(['reina']))
+    button(row, 'Select Tekken 8', lambda: tree.selection_set([n for n in tree.get_children() if tree.set(n, 'game') == 'Tekken 8']))
 
     descriptions = [('source', 'Wii U .wua archive', False), ('title', 'Extracted Wii U title (for development imports)', True),
                     ('install', 'Installation folder', True), ('data', 'User data folder (ends in TTT2Ultimate)', True),
@@ -307,12 +307,13 @@ def main():
     smoke_errors = []
     if args.ui_smoke_test:
         def smoke_body():
-            assert len(tree.get_children()) == 18
+            from ttt2char.characters import CHARACTERS
+            assert len(tree.get_children()) == len(CHARACTERS)
             tree.selection_set(['reina']); assert tree.selection() == ('reina',)
             tabs.select(paths_tab); assert fields['packs'].get() == settings.values['packs']
             tabs.select(display_tab); assert resolution.get()
             tabs.select(home)
-            args.ui_smoke_test.write_text(json.dumps(dict(window=window.title(), fighters=18, tabs=3,
+            args.ui_smoke_test.write_text(json.dumps(dict(window=window.title(), fighters=len(CHARACTERS), tabs=3,
                 selected=list(tree.selection()), paths=settings.values), indent=2), encoding='utf-8')
         def smoke():
             try: smoke_body()

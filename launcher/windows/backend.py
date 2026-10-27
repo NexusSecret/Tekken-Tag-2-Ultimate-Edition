@@ -130,12 +130,19 @@ def worker(settings, action, names):
         run_command(settings.installer_command(action == 'update'), settings)
     elif action in ('import', 'remove'):
         command = settings.import_command(names, action == 'remove')
-        if action == 'import' and 'reina' in names:
-            from ttt2char.tekken8 import autodump as t8
-            game = t8.find_tekken8()
-            t8.dump([28], references=[fid for fid in t8.ROSTER if fid != 28])
-            if not t8.whole(t8.saved_files('zbr', t8.MOVESETS, t8.game_version(game.game, game.library))):
-                raise RuntimeError('Reina extraction is incomplete; existing packs were not changed.')
+        if action == 'import':
+            from ttt2char.characters import definition, game_of
+            selected = [definition(name) for name in names]
+            t8_fighters = [d for d in selected if game_of(d) == 'tekken8']
+            if t8_fighters:
+                from ttt2char.tekken8 import autodump as t8
+                game = t8.find_tekken8()
+                ids = [d.TEKKEN8_ID for d in t8_fighters]
+                t8.dump(ids, references=[fid for fid in t8.ROSTER if fid not in ids])
+                version = t8.game_version(game.game, game.library)
+                for d in t8_fighters:
+                    if not t8.whole(t8.saved_files(d.TEKKEN8_CODE, t8.MOVESETS, version)):
+                        raise RuntimeError(d.NAME + ' extraction is incomplete; existing packs were not changed.')
         import runpy
         sys.argv = command[2:]
         runpy.run_path(command[2], run_name='__main__')

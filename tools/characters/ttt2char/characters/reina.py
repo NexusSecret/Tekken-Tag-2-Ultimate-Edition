@@ -23,8 +23,8 @@ MOVESET_SOURCE = 'tekken8'
 # update the helper does not know yet): the TTT2 fighter (code, motion row) whose moveset she fights with instead,
 # as it is (MOVESET_SOURCE 'donor'), the donor of everything then (importer.with_stand_in)
 STAND_IN = ('hei', 13)        # Heihachi Mishima
-# what packs of her made before lack (pack.revision; the launcher shows "Update ready"): 1: the d/f+1,2 bound
-REVISION = 4
+# Revision 5 combines our Bound/Sentai fixes with the incoming T8 cloth fixes.
+REVISION = 5
 
 # ------------------------------------------------------------------------------------------------ model
 # her Tekken 8 costumes: the CustomizeSet CS_zbr_<name> (tekken8/costume.py: its meshes, their merge order and the
