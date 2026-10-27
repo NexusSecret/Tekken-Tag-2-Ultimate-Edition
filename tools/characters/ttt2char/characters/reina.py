@@ -24,7 +24,7 @@ MOVESET_SOURCE = 'tekken8'
 # as it is (MOVESET_SOURCE 'donor'), the donor of everything then (importer.with_stand_in)
 STAND_IN = ('hei', 13)        # Heihachi Mishima
 # what packs of her made before lack (pack.revision; the launcher shows "Update ready"): 1: the d/f+1,2 bound
-REVISION = 2
+REVISION = 4
 
 # ------------------------------------------------------------------------------------------------ model
 # her Tekken 8 costumes: the CustomizeSet CS_zbr_<name> (tekken8/costume.py: its meshes, their merge order and the
@@ -98,7 +98,7 @@ MOVESET = {
     # length, never guessed from a source table index. SEN/WRA names were
     # recovered from the saved stance inputs: sen_RP=Sentai 2, sen_RK=Sentai 4,
     # kon_WK=Heaven's Wrath 3+4.
-    'move_name_seeds': ('Zbr_sen_RP', 'Zbr_sen_RK', 'Zbr_kon_WK'),
+    'move_name_seeds': ('Zbr_sen_RP', 'Zbr_sen_RK', 'Zbr_sen_WP2', 'Zbr_kon_WK', 'Zbr_sen_WK', 'Zbr_sen_WK2'),
     'bounds': {
         'Zbr_2RP': True,       # d+2
         'Zbr_6RK': True,       # f+4
@@ -111,13 +111,20 @@ MOVESET = {
         'Zbr_3RKRPLK': False,  # d/f+4,2,3
         'Zbr_RPRPRPLP': False, # 2,2,2,1
         'Zbr_4RK': False,      # b+4
+        'Zbr_8RK': False,      # u+4
+        'Zbr_sen_WP2': False,  # SEN 1+2, second hit
         'Zbr_9RK': False,      # u/f+4
         'Zbr_sen_RP': False,   # SEN 2
+        'Zbr_sen_WK': False,   # SEN 3+4, first hit
+        'Zbr_sen_WK2': False,  # SEN 3+4, automatic second hit
     },
     # 2+Tag buffered during d/f+1 selects the Tag Assault second hit directly.
     # The source demo buffers 3,2 before the simple command walker can follow
     # its second row. Bind this stable text entry to the same gameplay rule.
-    'bound_entries': {'TEXT_000_MOVELIST_NAME_ZBR_010': ('Zbr_LKRP', 2)},
+    'bound_entries': {'TEXT_000_MOVELIST_NAME_ZBR_010': ('Zbr_LKRP', 2),
+                      'TEXT_000_MOVELIST_NAME_ZBR_073': ('Zbr_sen_WP2', 2)},
+    # Restore SEN 3+4 as an ordinary simultaneous-button stance input.
+    'native_stance_inputs': {'Zbr_sen_WK': (0x185, 0x182)},
     'tag_assault_strings': {'Zbr_3LP': ('Zbr_3LPRP',)},
     # The tagged second hit must finish before its automatic stance-return rows.
     'tag_assault_finish_hit': ('Zbr_3LPRP',),

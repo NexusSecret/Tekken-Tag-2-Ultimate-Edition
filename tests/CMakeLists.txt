@@ -170,3 +170,9 @@ target_include_directories(eliza_assist_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime
 target_compile_features(eliza_assist_test PRIVATE cxx_std_20)
 target_compile_options(eliza_assist_test PRIVATE -UNDEBUG -Wall -Wextra)
 add_test(NAME eliza_assist_test COMMAND eliza_assist_test)
+
+add_executable(noctis_assault_test noctis_assault_test.cpp)
+target_include_directories(noctis_assault_test PRIVATE ${CMAKE_SOURCE_DIR}/runtime/src)
+target_compile_features(noctis_assault_test PRIVATE cxx_std_20)
+target_compile_options(noctis_assault_test PRIVATE -UNDEBUG -Wall -Wextra)
+add_test(NAME noctis_assault_test COMMAND noctis_assault_test)

@@ -1,5 +1,7 @@
 #include "title/roster.h"
 #include "title/eliza_assist.h"
+#include "title/noctis_assault.h"
+#include "title/noctis_hitbox.h"
 #include "title/damage_scaling.h"
 #include "outfit_menu.h"
 
@@ -3284,6 +3286,39 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
             }
         }
     }
+    // Preserve df4,2's working blade capsule. Its otherwise-unused second
+    // sphere gets a separate point below the tip, only during this move.
+    // The ordinary weapon guard point is refreshed above on every pose.
+    const int slot = slot_of_id(load(player + kPlayerSelectId));
+    const uint32_t move = load(player + 280);
+    const char* name = move && load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "";
+    if (slot >= 0 && (written & 8) && noctis_hitbox::lower_wall_point(g_added[slot].code, name)) {
+        const uint32_t tip = player + kPlayerItemPoints + 12 * 3;
+        const auto low = noctis_hitbox::below_tip({loadf(tip),loadf(tip+4),loadf(tip+8)});
+        const uint32_t spare = player + kPlayerItemPoints + 12;
+        storef(spare,low.x);storef(spare+4,low.y);storef(spare+8,low.z);
+        // Temporary wall-miss trace: sample collision geometry without changing it.
+        const int frame = static_cast<int>(loadf(load(player + kPlayerAnimator) + kAnimatorFrame));
+        static std::map<uint32_t, int> last_trace_frame;
+        if (last_trace_frame[player] != frame) {
+            last_trace_frame[player] = frame;
+            if (frame >= 17 && frame <= 23) {
+                const uint32_t foe = load(player + 0x98);
+                std::fprintf(stderr, "noctis-wall move=%s frame=%d player=%08X foe=%08X tip=%.1f,%.1f,%.1f low=%.1f,%.1f,%.1f\n",
+                    name, frame, player, foe, loadf(tip),loadf(tip+4),loadf(tip+8),low.x,low.y,low.z);
+                const uint32_t foe_skeleton = foe ? guest_call(ctx, base, sub_04E1A4C8, {foe}) : 0;
+                const uint32_t foe_records = foe_skeleton ? load(foe_skeleton + kSkeletonRecords) : 0;
+                if (foe_records) {
+                    std::fprintf(stderr, "noctis-wall defender id=%u move=%08X bones=", load(foe+kPlayerSelectId),load(foe+280));
+                    for (int b=0;b<22;++b) {
+                        const uint32_t at=foe_records+kRecordSize*b+kRecordWorld+48;
+                        std::fprintf(stderr," %d:%.1f,%.1f,%.1f",b,loadf(at),loadf(at+4),loadf(at+8));
+                    }
+                    std::fprintf(stderr,"\n");
+                }
+            }
+        }
+    }
 }
 
 } // namespace
@@ -3634,6 +3669,10 @@ uint32_t assist_recovery(uint32_t player) {
 // another list of character-specific special routes in the executable.
 eliza_assist::InputWindow special_assist_window(uint32_t player) {
     eliza_assist::InputWindow result;
+    const int slot = player ? slot_of_id(load(player + kPlayerSelectId)) : -1;
+    const bool reina = slot >= 0 && g_added[slot].code == "rei";
+    const bool noctis = slot >= 0 && g_added[slot].code == "mrz";
+    const std::string_view name(assist_move_name(player));
     const uint32_t move = load(player + kPlayerMove);
     uint32_t row = move ? load(move + 0x14) : 0;
     if (!row) return result;
@@ -3653,6 +3692,10 @@ eliza_assist::InputWindow special_assist_window(uint32_t player) {
         const uint32_t button = load(row + 4);
         const bool attack_button = (button & 0xf) && !(button & ~0x4000000fu);
         result.add(mode, attack_button ? button : 0, load(row + 20), capture);
+        if (noctis) result.bridge_last = std::max(result.bridge_last,
+            eliza_assist::noctis_contact_bridge(name, load(row), button, mode, load(row + 20)));
+        if (reina) result.last = std::max(result.last, eliza_assist::reina_stance_window(
+            name, load(row), button, mode, load(row + 20)));
     }
     return result;
 }
@@ -3678,10 +3721,11 @@ bool special_assist_sequence(uint32_t player) {
     const bool glide_finisher = name == "Vp_66lklk" || name == "Vp_66lklk_H" || name == "Vp_6rklkrk";
     const bool own_move = !glide_finisher && eliza_assist::owns_move(g_added[slot].code, name);
     const bool starts = legacy ? eliza_assist::entry(name) :
-        (window.buffered || (own_move && window.last));
+        ((g_added[slot].code != "mrz" || own_move) && (window.buffered || (own_move && window.last)));
     const uint32_t move = load(player + kPlayerMove);
     const uint32_t bridge_end = g_added[slot].code == "mry" && move ?
-        eliza_assist::geese_contact_bridge(name, load(move + 0x68)) : 0;
+        eliza_assist::geese_contact_bridge(name, load(move + 0x68)) :
+        g_added[slot].code == "mrz" ? window.bridge_end() : 0;
     const bool continues = legacy ? eliza_assist::continuation(name) : bridge_end != 0;
     const bool active = state.update_window(true, load(player + 0x408) == 0,
         load(player + 0x1e88) == 1, load(player + 0xac), load(player + kPlayerFrame),
@@ -3869,6 +3913,21 @@ PPC_FUNC(sub_0414E7E4) {
 }
 
 PPC_FUNC(sub_04336854_orig);
+namespace {
+void correct_noctis_assault_exit(uint32_t player) {
+    const int slot = player ? slot_of_id(load(player + kPlayerSelectId)) : -1;
+    if (slot < 0 || !noctis_assault::exit_move(g_added[slot].code, damage_move_name(player))) return;
+    const uint32_t partner = load(player + 0xac), opponent = load(player + 0x98);
+    if (!partner || !opponent || partner == opponent) return;
+    noctis_assault::Position position{loadf(player), loadf(player + 8)};
+    if (noctis_assault::keep_partner_side(position,
+            {loadf(partner),loadf(partner + 8)}, {loadf(opponent),loadf(opponent + 8)})) {
+        storef(player,position.x);
+        storef(player + 8,position.z);
+    }
+}
+} // namespace
+
 PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses into the objects at +164, +168)
     const uint32_t player = ctx.r[3];
     finish_special_assist(ctx, base, player);
@@ -3879,6 +3938,7 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
     const auto it = own ? g_arcs.find(player) : g_arcs.end();
     if (it == g_arcs.end() || it->second.mode == Arc2D::kNone) {
         sub_04336854_orig(ctx, base);
+        if (own) correct_noctis_assault_exit(player);
         return;
     }
     Arc2D& s = it->second;
@@ -3888,6 +3948,7 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
             storef(player + kPlayerVy, loadf(player + kPlayerVy) - (s.g - kTitleGravity) * slow_motion(player));
     }
     sub_04336854_orig(ctx, base);
+    if (own) correct_noctis_assault_exit(player);
     const uint32_t move = load(player + kPlayerMove);
     if (s.mode == Arc2D::kBaked) {
         if (move == s.move) {

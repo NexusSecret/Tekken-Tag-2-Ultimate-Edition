@@ -125,4 +125,68 @@ int main() {
     assert(!reina.update_window(true, false, true, 7, 1, 21, true, false));
     assert(!reina.update_window(true, true, false, 7, 1, 21, true, false));
 
+    using cafe::title::eliza_assist::reina_stance_window;
+    assert(reina_stance_window("Zbr_6RPLK", 64, 0, 0x182, 22) == 22);
+    assert(!reina_stance_window("My_Jyaei_C", 64, 0, 0x182, 22));
+    assert(!reina_stance_window("Zbr_6RPLK", 0, 0, 0x182, 22));
+    assert(!reina_stance_window("Zbr_6RPLK", 64, 4, 0x182, 22));
+    assert(!reina_stance_window("Zbr_6RPLK", 64, 0, 0x2800, 22));
+    assert(!reina_stance_window("Zbr_6RPLK", 64, 0, 0x182, 32767));
+    Session sentai;
+    assert(sentai.update_window(true, true, true, 1, 1, 27, true, false)); // f+2 -> 3
+    assert(sentai.update_window(true, true, true, 1, 22, 23, true, false)); // f+2,3 -> SEN
+    assert(sentai.update_window(true, true, true, 1, 24, 25, true, false)); // SEN -> 3+4
+    assert(!sentai.update_window(true, true, true, 1, 1, 0, false, false)); // commit; native finisher
+
+    // Every directional Sentai route identified in the installed Reina pack.
+    assert(reina_stance_window("Zbr_3LP", 64, 0, 0x182, 16) == 16); // d/f+1
+    assert(reina_stance_window("Zbr_66RP", 64, 0, 0x182, 17) == 17); // f,f+2
+    assert(reina_stance_window("Zbr_4LPLPLK", 64, 0, 0x182, 21) == 21); // b+1,1,3
+    assert(reina_stance_window("Zbr_LPLPRP", 1006, 0, 0x182, 20) == 20); // conditional 1,1,2
+    assert(reina_stance_window("Zbr_#1752", 64, 0, 0x182, 17) == 17); // d/f+1 variant
+    assert(reina_stance_window("Zbr_#2248", 64, 0, 0x182, 16) == 16); // d/f+1 variant
+    assert(!reina_stance_window("Zbr_66RP", 0x8000, 0, 0x182, 17)); // neutral/end
+    assert(!reina_stance_window("Zbr_66RP", 0x800b, 0, 0x182, 17)); // group
+    assert(!reina_stance_window("Zbr_66RP", 64, 0, 0x182, 0));
+    assert(!reina_stance_window("Zbr_66RP", 64, 0, 0x182, 180));
+    Session df1_sentai;
+    assert(df1_sentai.update_window(true,true,true,1,1,21,true,false));
+    assert(df1_sentai.update_window(true,true,true,1,17,18,true,false)); // airborne variant
+    assert(df1_sentai.update_window(true,true,true,1,1,23,true,false)); // Sentai
+    assert(!df1_sentai.update_window(true,true,true,1,1,0,false,false)); // finisher committed
+
+    // Noctis: preserve selection across the hit-confirmed float entry, then
+    // both buffered air punches. All terminal 1 / 1+2 / third-2 attacks release.
+    using cafe::title::eliza_assist::noctis_contact_bridge;
+    assert(supported("mrz"));
+    assert(owns_move("mrz","Mz_rk00") && owns_move("mrz","Mz_rk01_JUMP"));
+    assert(owns_move("mrz","Mz_jprp01F") && owns_move("mrz","Mz_jprp02"));
+    for (const char* terminal : {"Mz_jplp00F","Mz_jpWPF","Mz_rk01jpWPF","Mz_jprp03"})
+        assert(!owns_move("mrz",terminal));
+    assert(!owns_move("mrz","Mz_rp00F") && !owns_move("elz","Mz_jprp02"));
+    assert(noctis_contact_bridge("Mz_rk00y",0,0,0x182,13)==13);
+    assert(noctis_contact_bridge("Mz_rk01",0,0,0x401,27)==27);
+    assert(noctis_contact_bridge("Mz_rk01y",0,0,0x880,35)==35);
+    assert(!noctis_contact_bridge("Mz_rk01y",0,0,0x880,32767));
+    assert(!noctis_contact_bridge("Mz_rk01",0x800b,0,0x401,27));
+    assert(!noctis_contact_bridge("Mz_rk01",0,2,0x401,27));
+    assert(!noctis_contact_bridge("Mz_jprp03",0,0,0x401,27));
+    Session noctis;
+    assert(noctis.update_window(true,true,true,1,1,14,true,false)); // opening kick input
+    assert(noctis.update_window(true,true,true,1,13,14,false,true)); // buffered second hit
+    assert(noctis.update_window(true,true,true,1,27,28,false,true)); // air contact
+    assert(noctis.update_window(true,true,true,1,35,36,false,true)); // automatic jump
+    assert(noctis.update_window(true,true,true,1,42,43,true,false)); // select air 1/2/1+2
+    assert(noctis.update_window(true,true,true,1,15,16,true,false)); // 2 -> 2
+    assert(noctis.update_window(true,true,true,1,17,18,true,false)); // 2 -> third 2
+    assert(!noctis.update_window(true,true,true,1,1,0,false,false)); // committed finisher
+    Session missed_float;
+    assert(missed_float.update_window(true,true,true,1,1,14,true,false));
+    assert(missed_float.update_window(true,true,true,1,27,28,false,true));
+    assert(!missed_float.update_window(true,true,true,1,28,28,false,true)); // whiff expires
+    Session detached_float;
+    assert(!detached_float.update_window(true,true,true,1,1,36,false,true));
+    assert(!noctis.update_window(true,true,false,1,1,43,true,false));
+    assert(!noctis.update_window(true,false,true,1,1,43,true,false));
+
 }

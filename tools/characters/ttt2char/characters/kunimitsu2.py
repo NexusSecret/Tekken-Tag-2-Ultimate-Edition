@@ -79,7 +79,19 @@ VOICE_PREFIX = 'kt'
 
 # the id maps: Heihachi in both games, and her generic moves against TTT2's (Heihachi, the donor, Asuka)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
+# Keep both BT 1 stance-side variants: their generic names hide Kunimitsu's
+# own ktkb_s4_blp animation and BT 1,2 / BT 1,3 follow-ups.
+REVISION = 3
+
 MOVESET = {
+    'own_moves': r'^Co_R_(?:rp00L|lp00R)$',
+    # Native movement/tag groups also reference the donor's BT jab directly.
+    # Only exact 1 presses should use her attack, not native 2 or 1+2 turns.
+    'generic_input_replacements': {'Co_R_rp00L': 0x40000001, 'Co_R_lp00R': 0x40000001},
+    # Preserve normal arm coverage; add a lower private point for both BT 1 sides.
+    'hitboxes': {'Co_R_rp00L': (12, 13, 0xfe, 11),
+                 'Co_R_lp00R': (12, 13, 0xfe, 11),
+                 'Kt_Se_lp_LK': (0xfd, 0, 0xfd, 19)},
     'bounds': {'Kt_6lk_lprpLK': True},
     'buffered_stance_transitions': {'Kt_rk00F': 'Kt_shoryu02'},
     'name': '[KUNIMITSU]',
@@ -117,3 +129,16 @@ THROWN = {'Kt_236LP': dict(frame=15, forward=1200, up=350, speed=460, frames=13,
                            item=_KUNAI, trail=40),
           'Kt_2lkrk_LP': dict(frame=26, forward=1200, up=350, speed=470, frames=13, radius=150, height=250,
                               item=_KUNAI, trail=40)}
+
+# Slots 1 and 2 are unused by her converted attacks (the old kunai tip/hilt
+# were replaced by projectiles). Later invisible points take those slots;
+# the left sword's slot 0 and right sword's slot 3 keep their original reach.
+# Offsets are in the parent bone's local frame, in mm, calibrated at impact:
+# BT 1: 350 mm below its hand at frame 15; BT 1,3: 100 mm ahead of
+# the knee at frame 22 (93 mm at frame 23). Models/animation stay unchanged.
+WEAPONS += [
+    {'bone': 'L_Hand', 'parent': 'TE_L_jnt', 'pair': None,
+     'points': {0xfe: ({'parent_local_offset': (87.579403, -313.689518, 128.174626)}, 1)}},
+    {'bone': 'L_Leg', 'parent': 'HIZA_L_jnt', 'pair': None,
+     'points': {0xfd: ({'parent_local_offset': (-46.328674, -88.211068, -8.512432)}, 2)}},
+]

@@ -7,7 +7,71 @@ STRING_VAR, STRING_SET = {'t7': 352, 't8': 358}, {'t7': 0x80a6, 't8': 0x80c5}
 
 
 
+def normalize_stance_input(c, name, source_mode, native_mode):
+    """Opt-in a finite, exact multi-button stance input to native input handling.
+
+    Keep the original mask, guards, animation start and selection window. Copy
+    cancel lists before changing them, including when multiple moves share one.
+    The target attack/automatic continuation and all reactions are untouched.
+    """
+    if source_mode != 0x185 or native_mode != 0x182:
+        raise ValueError('unsupported stance input modes: ' + name)
+    target = c.newidx[c.kn[name]]
+    eligible = 0
+    extra = next((i for i, x in enumerate(c.T['cancel_extras']) if x['value'] == native_mode), None)
+    for move in c.T['moves']:
+        rows = TS.cancels(c.T, move['cancel'])
+        out, changed = [], False
+        for row in rows:
+            value = c.T['cancel_extras'][row['extradata']]['value'] if row['extradata'] is not None else None
+            if row['move_id'] == target and value in (source_mode, native_mode) and row['direction'] == 0                     and row['button'] == 0x4000000c and 1 <= row['win_start'] <= row['win_end'] < 180:
+                eligible += 1
+                if value == source_mode:
+                    if extra is None:
+                        extra = len(c.T['cancel_extras']);c.T['cancel_extras'].append(dict(value=native_mode))
+                    row = dict(row, extradata=extra);changed = True
+                    c.stats['native stance inputs restored'] += 1
+            out.append(dict(row))
+        if changed:
+            move['cancel'] = TS.write(c.T, 'cancels', out)
+    if not eligible:
+        raise ValueError('no finite simultaneous-button stance input found: ' + name)
+
+
+def replace_generic_inputs(c, replacements):
+    """Route explicitly selected native inputs to retained source attacks.
+
+    Keep every row's direction, requirements, timing and priority. Native
+    groups can still name the donor copy after own_moves adds a source copy;
+    do not redirect other buttons sharing that donor attack.
+    """
+    from . import idmaps as M
+    targets = {}
+    for name, button in replacements.items():
+        if button != 0x40000001:
+            raise ValueError('unsupported generic input replacement: ' + name)
+        if name not in c.dn or name not in c.kn or c.kn[name] not in c.newidx:
+            raise ValueError('generic input replacement lacks retained attack: ' + name)
+        targets[(c.dn[name], button)] = c.newidx[c.kn[name]]
+    count = 0
+    for table in ('cancels', 'group_cancels'):
+        for i, row in enumerate(c.T[table]):
+            if row['direction'] in (M.GROUP, M.GROUP_END, M.LIST_END):
+                continue
+            target = targets.get((row['move_id'], row['button']))
+            if target is not None:
+                c.T[table][i] = dict(row, move_id=target)
+                count += 1
+    c.stats['native inputs routed to retained attacks'] += count
+    return count
+
+
 def apply(c):
+    replacements = c.defn.MOVESET.get('generic_input_replacements', {})
+    if replacements:
+        replace_generic_inputs(c, replacements)
+    for target, (source_mode, native_mode) in c.defn.MOVESET.get('native_stance_inputs', {}).items():
+        normalize_stance_input(c, target, source_mode, native_mode)
     for source in c.defn.MOVESET.get("free_air_screws", ()):
         free_air_screw(c, source)
     for source in c.defn.MOVESET.get("source_air_reactions", ()):
@@ -49,20 +113,7 @@ def apply(c):
         move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
         c.stats['explicit move damage overrides'] += 1
     for name, bound in c.defn.MOVESET.get('bounds', {}).items():
-        move = c.T['moves'][c.newidx[c.kn[name]]]
-        hits = [dict(h) for h in TS.hits(c.T, move['hit_condition'])]
-        if bound:
-            # One bound per juggle; preserve all ground and post-bound reactions.
-            hits = [h for h in hits if not TS.has(c.T, h['req'], TS.BOUND)]
-            damage = next((h['damage'] for h in hits if TS.has(c.T, h['req'], TS.AIR)), hits[-1]['damage'])
-            hits.insert(0, dict(req=c.bound_req, damage=damage, reactions=c.bound_reaction))
-        else:
-            hits = [h for h in hits if not TS.has(c.T, h['req'], TS.BOUND)]
-            for h in hits:
-                if TS.has(c.T, h['req'], TS.AIR) and TS.same_reaction(c.T, h['reactions'], c.bound_reaction):
-                    h['reactions'] = c.after_bound_reaction
-        move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
-        c.stats['explicit bound enabled' if bound else 'explicit bound removed'] += 1
+        set_bound(c, name, bound)
 
     for name, locations in c.defn.MOVESET.get('hitboxes', {}).items():
         c.T['moves'][c.newidx[c.kn[name]]]['hitbox'] = bytes(c.hit_location(x) for x in locations)
@@ -588,3 +639,21 @@ def command_bounds(c):
                 out[n] = marked[move]
         return out
     return marks
+
+
+def set_bound(c, name, bound):
+    """Change one move using private hit lists; leave unrelated conversion steps alone."""
+    move = c.T['moves'][c.newidx[c.kn[name]]]
+    hits = [dict(h) for h in TS.hits(c.T, move['hit_condition'])]
+    if bound:
+        # One bound per juggle; preserve all ground and post-bound reactions.
+        hits = [h for h in hits if not TS.has(c.T, h['req'], TS.BOUND)]
+        damage = next((h['damage'] for h in hits if TS.has(c.T, h['req'], TS.AIR)), hits[-1]['damage'])
+        hits.insert(0, dict(req=c.bound_req, damage=damage, reactions=c.bound_reaction))
+    else:
+        hits = [h for h in hits if not TS.has(c.T, h['req'], TS.BOUND)]
+        for h in hits:
+            if TS.has(c.T, h['req'], TS.AIR) and TS.same_reaction(c.T, h['reactions'], c.bound_reaction):
+                h['reactions'] = c.after_bound_reaction
+    move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
+    c.stats['explicit bound enabled' if bound else 'explicit bound removed'] += 1
