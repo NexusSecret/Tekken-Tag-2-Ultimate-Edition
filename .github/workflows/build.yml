@@ -35,7 +35,10 @@ jobs:
       - run: python launcher/windows/test_self_update.py
       - run: python launcher/windows/test_keys.py
       - name: Windows release launcher
-        run: python launcher/windows/make_launcher_exe.py build-linux/Ultimate_Launcher-x86_64.exe
+        # (Git refuses a repository another user owns: the checkout's, here in a container run as root.)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          python launcher/windows/make_launcher_exe.py build-linux/Ultimate_Launcher-x86_64.exe
   windows:
     name: Windows portable tools and importer
     runs-on: windows-latest

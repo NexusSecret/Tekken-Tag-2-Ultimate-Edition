@@ -46,7 +46,10 @@ def die(message):
 
 
 def git(*args):
-    return subprocess.run(['git', '-C', str(REPO), *args], check=True, capture_output=True).stdout
+    result = subprocess.run(['git', '-C', str(REPO), *args], capture_output=True)
+    if result.returncode:
+        die('git %s failed: %s' % (args[0], result.stderr.decode('utf-8', 'replace').strip() or result.returncode))
+    return result.stdout
 
 
 def tracked(allow_dirty):
