@@ -14,9 +14,10 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]);
 void reset();
 // The ULTIMATE SETTINGS submenu's settings, as on (1) or off (0): the
 // frame data panels at all, 1P's, 2P's, the fighters coloured by frame
-// advantage, the hitboxes, the camera from above.
-enum Setting { kPanels, kPanel1P, kPanel2P, kAdvantageColours, kHitboxes, kTopCamera, kSettings };
+// advantage, the hitboxes, the camera from above; and the slow motion: 0
+// off, 1 half speed, 2 a quarter.
+enum Setting { kPanels, kPanel1P, kPanel2P, kAdvantageColours, kHitboxes, kTopCamera, kSlowMotion, kSettings };
 uint32_t setting(Setting s);
-void set_setting(Setting s, uint32_t on);
+void set_setting(Setting s, uint32_t value);
 
 } // namespace cafe::title::framedata

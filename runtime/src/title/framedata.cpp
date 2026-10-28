@@ -67,6 +67,7 @@
 #include "title/framedata.h"
 
 #include "gpu/overlay.h"
+#include "host/window.h"
 #include "title/draw.h"
 #include "title/font.h"
 #include "title/image.h"
@@ -103,7 +104,7 @@ constexpr uint32_t kPosture = 872;
 constexpr uint32_t kButtonsHeld = 2032, kDirection = 2036, kPadButtons = 2052;
 constexpr uint32_t kMoveHitLevel = 0x10, kMoveFirstActive = 0x64, kMoveLastActive = 0x68;
 constexpr uint32_t kPracticeSettings = 0x108D1C60;              // sub_04F1BD58
-constexpr uint32_t kCommandHistory = 48, kDamageInfo2 = 60;      // its HUD Information rows (1: on)
+constexpr uint32_t kCommandHistory = 48;                         // its HUD Information row (1: on)
 constexpr uint32_t kMeasureFrames = 300; // how long an advantage is waited for
 
 struct Fighter {
@@ -229,7 +230,7 @@ struct Session {
     bool failed = false;
     std::vector<Input> history; // newest last
     int player = 0;             // the side the GamePad drives
-    uint32_t settings[kSettings] = {1, 1, 1, 0, 0, 0};
+    uint32_t settings[kSettings] = {1, 1, 1, 0, 0, 0, 0};
     Side sides[2];
     Fighter previous[2];
     bool have_previous = false;
@@ -387,8 +388,16 @@ struct Icon {
     uint32_t width = 0, height = 0; // in the font's texture
 };
 
+// The position reset's tooltip, in the look of the title's own (as
+// Defensive Training's "Select + button: Start"): Select's icon, "+", the
+// button picture of 3 (bit 2), text; the icons as the title shows them for
+// the controller in use (the main font's texture with the port's icons:
+// neutral, PlayStation).
+constexpr uint16_t kSelectIcon = 0xE037, kButton3Picture = kButtonPictures + 4;
+
 struct Atlas {
     Icon arrows[10], buttons[16];
+    Icon tip_select[2], tip_button[2]; // neutral, PlayStation
     float white[4] = {};                    // uv of a white block
     NineSlice panel[2];                     // 1P's, 2P's
     Face labels, values;
@@ -566,13 +575,28 @@ constexpr FontFiles kLabelFont{0x46B70814, 0x335915C9}; // the Japanese gothic f
 constexpr FontFiles kValueFont{0x3A27BC43, 0x4FC9A19E}; // the main font (bold italic)
 
 // The icons: packed after the fonts, (atlas index, code) in `at`.
-bool add_icons(Packer& packer, std::vector<std::pair<uint32_t, uint16_t>>& at) {
+bool add_icons(Packer& packer, std::vector<std::pair<uint32_t, uint16_t>>& at,
+               std::vector<std::pair<uint32_t, Icon*>>& tip_at) {
     const auto table = game_file(kFontArchive, kValueFont.glyphs);
     const auto file = game_file(kFontArchive, kValueFont.texture);
     const auto metrics = table ? font::parse_metrics(*table) : std::nullopt;
+    const auto glyphs = table ? font::parse(*table) : std::nullopt;
     const auto textures = file ? ntp3::parse(*file) : std::nullopt;
     const auto texture = textures && !textures->empty() ? ntp3::decode(textures->front()) : std::nullopt;
-    if (!metrics || !texture) return false;
+    if (!metrics || !glyphs || !texture) return false;
+    // The tooltip's icons, from the textures the title draws with.
+    const font::Font main{*glyphs, *texture};
+    const Rgba variants[2] = {font::neutral_icons(main), font::playstation_icons(main)};
+    for (int v = 0; v < 2; ++v) {
+        for (const auto& [code, icon] : {std::pair{kSelectIcon, &g_atlas.tip_select[v]}, std::pair{kButton3Picture, &g_atlas.tip_button[v]}}) {
+            const auto it = metrics->glyphs.find(code);
+            if (it == metrics->glyphs.end()) return false;
+            const font::Glyph& g = it->second.box;
+            if (!g.width || !g.height || g.x + g.width > variants[v].width || g.y + g.height > variants[v].height) return false;
+            packer.add(crop(variants[v], g.x, g.y, g.width, g.height));
+            tip_at.push_back({static_cast<uint32_t>(packer.placed.size() - 1), icon});
+        }
+    }
     std::vector<uint16_t> codes;
     for (uint16_t c : kArrows) {
         if (c) codes.push_back(c);
@@ -626,8 +650,9 @@ bool build_atlas() {
     packer.add(title_box ? std::move(*red_box) : panel_image(true));
     std::vector<std::pair<uint32_t, uint16_t>> labels, values;
     std::vector<std::pair<uint32_t, uint16_t>> icons;
+    std::vector<std::pair<uint32_t, Icon*>> tip_icons;
     if (!add_font(packer, kLabelFont, g_atlas.labels, labels) || !add_font(packer, kValueFont, g_atlas.values, values) ||
-        !add_icons(packer, icons)) {
+        !add_icons(packer, icons, tip_icons)) {
         return false;
     }
     auto atlas = std::make_shared<gpu::overlay::Atlas>();
@@ -681,6 +706,11 @@ bool build_atlas() {
         uv(i, r);
         *icon = {r[0], r[1], r[2], r[3], packer.placed[i].first.width, packer.placed[i].first.height};
     }
+    for (const auto& [i, icon] : tip_icons) {
+        float r[4];
+        uv(i, r);
+        *icon = {r[0], r[1], r[2], r[3], packer.placed[i].first.width, packer.placed[i].first.height};
+    }
     gpu::overlay::set_atlas(std::move(atlas));
     return true;
 }
@@ -694,6 +724,11 @@ constexpr float kWidth = 270, kMargin = 226, kRow = 15, kGap = 5; // (kMargin: f
 // Room inside a panel, clear of the box's top left step and bottom right notch.
 constexpr float kPadTop = 10, kPadBottom = 14, kPadSide = 14;
 constexpr float kLabelPx = 12.5f, kValuePx = 13.5f; // text heights (the font's size scaled to)
+// The hint line: the title's hints' height and size (Defensive Training's at
+// x 138, y 643 to 666), the panels above it.
+constexpr float kTipY = 654.5f, kTipIcon = 23, kTipButton = 19, kTipPx = 21, kTipSide = 138, kPanelsBottom = 634;
+constexpr float kTipSpacing = -1.0f; // added to each glyph's advance
+constexpr uint32_t kTipOutline = 0x000000B0;
 
 class Layout {
 public:
@@ -729,6 +764,34 @@ public:
         if (!i.height) return;
         const float w = height * static_cast<float>(i.width) / static_cast<float>(i.height);
         quads.push_back({x, y - height / 2, x + w, y + height / 2, i.u0, i.v0, i.u1, i.v1, 0xFFFFFFFF, 0xFFFFFFFF});
+    }
+
+    // As the title draws its hints: a dark outline round each glyph, set a
+    // little tighter than the font's advances.
+    static float hint_width(const Face& face, float px, const std::string& text) {
+        return width(face, px, text) + kTipSpacing * static_cast<float>(text.size());
+    }
+    void hint_text(const Face& face, float px, float x, float y, const std::string& text, uint32_t colour) {
+        // The outline (and a shadow down and right), then the text.
+        static constexpr float kAround[][2] = {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0},  {-1, 1},
+                                               {0, 1},   {1, 1},  {1.5f, 1.5f}, {0, 0}};
+        const float s = px / static_cast<float>(face.size);
+        for (const auto& d : kAround) {
+            const bool fill = d[0] == 0 && d[1] == 0;
+            const uint32_t c = fill ? colour : kTipOutline;
+            float pen = x + d[0];
+            for (unsigned char ch : text) {
+                if (ch >= 128) continue;
+                const GlyphUv& g = face.glyphs[ch];
+                const font::PlacedGlyph& pg = g.glyph;
+                if (pg.box.width > 0 && pg.box.height > 0) {
+                    const float gx = pen + static_cast<float>(pg.placement.left) * s;
+                    const float gy = y + d[1] - static_cast<float>(pg.placement.top) * s;
+                    quads.push_back({gx, gy, gx + pg.box.width * s, gy + pg.box.height * s, g.u0, g.v0, g.u1, g.v1, c, c});
+                }
+                pen += static_cast<float>(pg.placement.advance) * s + kTipSpacing;
+            }
+        }
     }
 
     static float width(const Face& face, float px, const std::string& text) {
@@ -1034,14 +1097,31 @@ std::shared_ptr<const gpu::overlay::Scene> hitbox_scene(const Camera& camera,
     return scene;
 }
 
+// The position reset's tooltip, on the title's hint line, at the right
+// (the title's own hints are at the left).
+void lay_out_tooltip(Layout& l) {
+    const int v = host::active_controller() == host::Controller::kPlayStation ? 1 : 0;
+    const Atlas& a = g_atlas;
+    const Icon &select = a.tip_select[v], &button = a.tip_button[v];
+    const auto icon_width = [](const Icon& i, float h) { return i.height ? h * i.width / i.height : 0.0f; };
+    const char* text = "Reset Position";
+    const float plus_w = Layout::hint_width(a.labels, kTipPx, "+"), text_w = Layout::hint_width(a.labels, kTipPx, text);
+    const float w = icon_width(select, kTipIcon) + 2 + plus_w + 2 + icon_width(button, kTipButton) + 6 + text_w;
+    float x = gpu::overlay::kWidth - kTipSide - w;
+    l.icon(select, x, kTipY, kTipIcon);
+    x += icon_width(select, kTipIcon) + 2;
+    l.hint_text(a.labels, kTipPx, x, kTipY + kTipPx * 0.36f, "+", kValue);
+    x += plus_w + 2;
+    l.icon(button, x, kTipY, kTipButton);
+    x += icon_width(button, kTipButton) + 6;
+    l.hint_text(a.labels, kTipPx, x, kTipY + kTipPx * 0.36f, text, kValue);
+}
+
 void publish(uint8_t* base, const Fighter now[2]) {
     const bool history = ppc::ld32(base, kPracticeSettings + kCommandHistory) == 1;
-    if (!g.settings[kPanels] && !history && !g.settings[kHitboxes] && !g.settings[kTopCamera]) {
-        gpu::overlay::show({}, 0);
-        return;
-    }
-    // Above the title's DAMAGE INFO 2 bars along the bottom when they are on.
-    const float bottom = ppc::ld32(base, kPracticeSettings + kDamageInfo2) == 1 ? 634 : 704;
+    // Above the line along the bottom where the title puts its hints (and
+    // DAMAGE INFO 2's bars), and the position reset's tooltip.
+    const float bottom = kPanelsBottom;
     Layout l;
     l.quads.reserve(1600);
     std::shared_ptr<const gpu::overlay::Scene> scene;
@@ -1067,6 +1147,7 @@ void publish(uint8_t* base, const Fighter now[2]) {
         l.panel(0, r[0] - 7, r[1] - 26, r[2] + 8, r[3] + 14);
         l.text(g_atlas.labels, kLabelPx, r[0] + 12, r[1] - 7, "Top View", kLabel);
     }
+    lay_out_tooltip(l);
     gpu::overlay::show(std::move(l.quads), 0.25, std::move(scene), std::move(window));
 }
 
@@ -1121,7 +1202,7 @@ void reset() { start_over(); }
 
 uint32_t setting(Setting s) { return g.settings[s]; }
 
-void set_setting(Setting s, uint32_t on) { g.settings[s] = on ? 1 : 0; }
+void set_setting(Setting s, uint32_t value) { g.settings[s] = s == kSlowMotion ? std::min(value, 2u) : value ? 1 : 0; }
 
 // The colour the title draws a fighter in (r3 the fighter) -> r3, four
 // floats (red, green, blue, alpha).

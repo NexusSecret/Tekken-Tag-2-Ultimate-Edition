@@ -319,6 +319,7 @@ private:
     Image view_image_;
     bool view_image_valid_ = false;
     uint32_t view_replaced_ = 0; // blocks the view replay found the camera in
+    uint64_t view_generation_ = 0; // overlay::window_generation() of the last view replay
     std::vector<Target*> view_kept_; // targets the view replay puts back as they were
     void view_constants(uint32_t draw_index, latte::abi::DrawConstants& dc);
     bool replayed_ = false; // this frame's extra frames were rendered

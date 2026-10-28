@@ -393,9 +393,13 @@ bool Renderer::logs_frames() {
 
 bool Renderer::want_view_replay() {
     if (!logging_ || overlay::current().window == nullptr) return false;
+    const uint64_t generation = overlay::window_generation();
+    if (generation == view_generation_) return false; // (no new window: a paused or held frame)
     uint64_t done = 0;
     VK_CHECK(vkGetSemaphoreCounterValue(ctx_.device, timeline_, &done));
-    return done >= previous_frame_ready_; // (the GPU keeping up)
+    if (done < previous_frame_ready_) return false; // (the GPU keeping up)
+    view_generation_ = generation;
+    return true;
 }
 
 void Renderer::view_constants(uint32_t draw_index, abi::DrawConstants& dc) {

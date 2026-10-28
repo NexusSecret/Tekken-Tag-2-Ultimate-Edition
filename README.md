@@ -49,7 +49,8 @@ and shaders are translated to Vulkan as it runs.
   Edition", in the same brush lettering. All of it is made by the port
   from the Wii U game's own files.
 - **Position reset in Practice**, as in Tekken 8: 3 and − (Select) pressed
-  together put both fighters back where the stage put them.
+  together put both fighters back where the stage put them; a hint at the
+  bottom right of the screen says so, in the look of the game's own.
 - **Frame data in Practice**, as in Tekken 8: a panel for each player at the
   bottom of the screen shows the damage of their hits and combos, the hit
   level, startup and active frames of their last attack, frame advantage
@@ -60,10 +61,12 @@ and shaders are translated to Vulkan as it runs.
 - **Hitboxes and a view from above in Practice**: the fighters' bodies as
   the game tests hits against them, in 3D, and their attacks' hit lines,
   with the parts an attack reaches lit red; a window shows the fight from
-  above as well, to see what a sidestep avoids.
-- **Input history in Practice**, as in Tekken 8: COMMAND HISTORY shows the
-  player's inputs in a column on the left, newest on top, each with the
-  frames it was held, in place of the game's bar along the bottom.
+  above as well, to see what a sidestep avoids; slow motion at half or a
+  quarter speed.
+- **Input history in Practice**, as in Tekken 8: COMMAND HISTORY (on from
+  the start of each Practice session) shows the player's inputs in a column
+  on the left, newest on top, each with the frames it was held, in place of
+  the game's bar along the bottom.
 - **No forced input delay**: the Wii U game waits two frames (33 ms) after
   reading a button before acting on it, in every mode (Cemu's "Reduce input
   lag" graphic pack removes it too). The port leaves that wait out; the
@@ -362,6 +365,10 @@ with:
   whether an attack's line reaches across a sidestep shows directly. It
   costs a second rendering of each frame while it is on; only what the
   game's own camera could see is drawn in it.
+- SLOW MOTION: OFF, 1/2 or 1/4 speed, as in Smash Bros.' training mode:
+  the fight steps its frames at that rate (the same picture shown in
+  between), and every button pressed meanwhile still counts. The pause
+  menu keeps its speed.
 
 2P's panel has a red tint.
 

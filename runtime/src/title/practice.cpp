@@ -41,6 +41,7 @@
 PPC_FUNC(sub_04F9FB6C); // a select value's cursor set (r3 the cursor, r4 the value's name)
 PPC_FUNC(sub_04F9FB8C_orig); // a select value's cursor (r3 the value's name) -> r3 (as it is: see the hook)
 PPC_FUNC(sub_04545920); // the menu's entity by name (r3 the menus + 4, r4 the name) -> r3
+PPC_FUNC(sub_045590E0); // a select value entry's text (r3 the entry) -> r3
 
 namespace {
 
@@ -251,6 +252,10 @@ constexpr TextPatch kSubmenuTexts[] = {
     {"practice_839", "Show the fight from above too."},
     {"practice_840", "Window from above"},
     {"practice_841", "Window from above"},
+    {"practice_678", "SLOW MOTION"},
+    {"practice_842", "Slow the fighters down to learn moves."},
+    {"practice_843", "Half or quarter speed"},
+    {"practice_844", "Half or quarter speed"},
 };
 
 // HUD Information's rows show the practice settings' HUD words (1 on, from
@@ -264,7 +269,8 @@ constexpr TextPatch kSubmenuTexts[] = {
 constexpr uint32_t kHudWords = 48, kHudValueNames = 0x1031C9C8, kHudValueNameStride = 0x24;
 constexpr title::framedata::Setting kSubmenuRows[] = {title::framedata::kPanels, title::framedata::kPanel1P,
                                                       title::framedata::kPanel2P, title::framedata::kAdvantageColours,
-                                                      title::framedata::kHitboxes, title::framedata::kTopCamera};
+                                                      title::framedata::kHitboxes, title::framedata::kTopCamera,
+                                                      title::framedata::kSlowMotion};
 constexpr uint32_t kHudRows = 8;
 
 bool g_submenu = false;   // HUD Information's frame shows ULTIMATE SETTINGS
@@ -278,7 +284,7 @@ uint32_t g_hud_words[std::size(kSubmenuRows)], g_hud_cursors[std::size(kSubmenuR
 // the menu natives find them: by name from *(*0x1084FEBC + 744) + 4, once
 // made (0x1084FEB8).
 constexpr uint32_t kMenusMade = 0x1084FEB8, kMenusHolder = 0x1084FEBC, kMenus = 744, kValueDefault = 368;
-constexpr uint32_t kFrameDataDefaults[] = {0, 0, 0, 1, 1, 1}; // the settings to begin with: the panels on
+constexpr uint32_t kFrameDataDefaults[] = {0, 0, 0, 1, 1, 1, 1}; // the settings to begin with: the panels on (slow motion: its own entries)
 
 uint32_t select_value(PPCContext& ctx, uint8_t* base, uint32_t name) {
     if (!load(base, kMenusMade)) return 0;
@@ -305,22 +311,31 @@ uint32_t hud_value(size_t row) { return kHudValueNames + kHudValueNameStride * s
 // ULTIMATE SETTINGS' settings into the rows' values (as the frame comes, and
 // again once it is up: the title may fill them from the HUD words in
 // between), and back out of them while it is up.
+// A row's cursor for its setting: ON 0, OFF 1; SLOW MOTION's its value
+// (OFF, 1/2, 1/4).
+uint32_t setting_cursor(size_t row) {
+    const uint32_t v = title::framedata::setting(kSubmenuRows[row]);
+    return kSubmenuRows[row] == title::framedata::kSlowMotion ? v : v ? 0u : 1u;
+}
+
 void show_settings(PPCContext& ctx, uint8_t* base) {
-    for (size_t i = 0; i < std::size(kSubmenuRows); ++i) {
-        call(ctx, base, sub_04F9FB6C, {title::framedata::setting(kSubmenuRows[i]) ? 0u : 1u, hud_value(i)});
-    }
+    for (size_t i = 0; i < std::size(kSubmenuRows); ++i) call(ctx, base, sub_04F9FB6C, {setting_cursor(i), hud_value(i)});
 }
 
 void take_settings(PPCContext& ctx, uint8_t* base) {
     for (size_t i = 0; i < std::size(kSubmenuRows); ++i) {
         const uint32_t cursor = call(ctx, base, sub_04F9FB8C_orig, {hud_value(i)});
-        if (cursor <= 1) title::framedata::set_setting(kSubmenuRows[i], cursor == 0);
+        if (kSubmenuRows[i] == title::framedata::kSlowMotion) {
+            if (cursor <= 2) title::framedata::set_setting(kSubmenuRows[i], cursor);
+        } else if (cursor <= 1) {
+            title::framedata::set_setting(kSubmenuRows[i], cursor == 0);
+        }
     }
 }
 
 // The rows' looks: a select value's entries (40 bytes each, from the
-// pointer at +348; +36 the entry's style) are drawn in the colour of their
-// style: green for the row's default, yellow otherwise. While a row is
+// pointer at +348; +36 the id of the entry's text, which holds its colour:
+// green for the row's default, yellow otherwise; "styles" here). While a row is
 // ULTIMATE SETTINGS', its default (+368) and its entries' styles are those of a
 // row whose default is that ULTIMATE SETTINGS row's (on, or off: COMMAND HISTORY's);
 // HUD Information gets its own back once it can (the pause menu closed from
@@ -340,6 +355,74 @@ void entry_styles(uint8_t* base, uint32_t value, uint32_t styles[2], bool write)
         if (write) ppc::st32(base, at, styles[e]);
         else styles[e] = load(base, at);
     }
+}
+
+// SLOW MOTION has three values where its HUD Information row (ATTACK
+// PROPERTIES) has two: while the row is ULTIMATE SETTINGS', its select
+// value's entries (a vector: begin, end and capacity at +348, +352, +356;
+// 40 bytes each) are three of the port's, and its own come back before
+// their looks do (the title frees them). An entry's text is a text of the
+// menu's (+32 its kind, +36 its id: the value as drawn, its arrows and its
+// colour, green at the row's default, yellow otherwise, in the text's
+// control codes), or with those 0 its own string (inline at +4 up to 15
+// bytes, else at the pointer at +20; its length at +24, room at +28), read
+// through sub_045590E0. OFF is the row's own green OFF (its default, once
+// it has the looks of a row whose default is OFF); 1/2 and 1/4 are its
+// yellow ON's text with the word changed.
+constexpr uint32_t kValueEntriesEnd = 352, kValueEntriesCapacity = 356;
+constexpr uint32_t kEntryHeapText = 20, kEntryTextLength = 24, kEntryTextRoom = 28, kEntryTextKind = 32, kEntryTextId = 36;
+constexpr uint32_t kSlowTextRoom = 128;
+constexpr const char* kSlowSpeeds[] = {" 1/2 ", " 1/4 "};
+
+struct OwnEntries {
+    bool swapped = false;
+    uint32_t value = 0, begin = 0, end = 0, capacity = 0, default_cursor = 0;
+} g_own_entries;
+
+void slow_motion_entries(PPCContext& ctx, uint8_t* base, size_t row) {
+    if (g_own_entries.swapped) return;
+    const uint32_t value = select_value(ctx, base, hud_value(row));
+    if (!value) return;
+    const uint32_t begin = load(base, value + kValueEntries), end = load(base, value + kValueEntriesEnd);
+    if (end != begin + 2 * kEntrySize) return;
+    // Its yellow ON, as text.
+    const uint32_t on = call(ctx, base, sub_045590E0, {begin});
+    if (!on || !guest_memory_committed(on, kSlowTextRoom)) return;
+    const std::string on_text(reinterpret_cast<const char*>(base + on), strnlen(reinterpret_cast<const char*>(base + on), kSlowTextRoom));
+    const size_t word = on_text.find(" ON ");
+    if (word == std::string::npos) return;
+    static const uint32_t entries = system_alloc(3 * kEntrySize);
+    static const uint32_t texts = system_alloc(2 * kSlowTextRoom);
+    std::memcpy(guest_pointer(entries), guest_pointer(begin + kEntrySize), kEntrySize); // OFF
+    for (uint32_t e = 0; e < 2; ++e) {
+        const uint32_t at = entries + (e + 1) * kEntrySize, text = texts + e * kSlowTextRoom;
+        const std::string t = on_text.substr(0, word) + kSlowSpeeds[e] + on_text.substr(word + 4);
+        if (t.size() + 1 > kSlowTextRoom) return;
+        std::memcpy(guest_pointer(at), guest_pointer(begin), kEntrySize);
+        std::memcpy(guest_pointer(text), t.c_str(), t.size() + 1);
+        ppc::st32(base, at + kEntryHeapText, text);
+        ppc::st32(base, at + kEntryTextLength, static_cast<uint32_t>(t.size()));
+        ppc::st32(base, at + kEntryTextRoom, kSlowTextRoom - 1);
+        ppc::st32(base, at + kEntryTextKind, 0);
+        ppc::st32(base, at + kEntryTextId, 0);
+    }
+    g_own_entries = {true, value, begin, end, load(base, value + kValueEntriesCapacity), load(base, value + kValueDefault)};
+    const uint32_t entries_end = entries + 3 * kEntrySize;
+    ppc::st32(base, value + kValueEntries, entries);
+    ppc::st32(base, value + kValueEntriesEnd, entries_end);
+    ppc::st32(base, value + kValueEntriesCapacity, entries_end);
+    ppc::st32(base, value + kValueDefault, 0);
+}
+
+void own_entries_back(PPCContext& ctx, uint8_t* base, size_t row) {
+    if (!g_own_entries.swapped) return;
+    const OwnEntries& o = g_own_entries;
+    g_own_entries.swapped = false;
+    if (select_value(ctx, base, hud_value(row)) != o.value) return; // (the menu gone: nothing to give back to)
+    ppc::st32(base, o.value + kValueEntries, o.begin);
+    ppc::st32(base, o.value + kValueEntriesEnd, o.end);
+    ppc::st32(base, o.value + kValueEntriesCapacity, o.capacity);
+    ppc::st32(base, o.value + kValueDefault, o.default_cursor);
 }
 
 void frame_data_looks(PPCContext& ctx, uint8_t* base) {
@@ -366,9 +449,15 @@ void frame_data_looks(PPCContext& ctx, uint8_t* base) {
         ppc::st32(base, values[i] + kValueDefault, wanted);
         entry_styles(base, values[i], styles[wanted], true);
     }
+    for (size_t i = 0; i < std::size(kSubmenuRows); ++i) {
+        if (kSubmenuRows[i] == title::framedata::kSlowMotion) slow_motion_entries(ctx, base, i);
+    }
 }
 
 void hud_looks(PPCContext& ctx, uint8_t* base) {
+    for (size_t i = 0; i < std::size(kSubmenuRows); ++i) {
+        if (kSubmenuRows[i] == title::framedata::kSlowMotion) own_entries_back(ctx, base, i);
+    }
     for (size_t i = 0; i < std::size(kSubmenuRows); ++i) {
         Look& look = g_looks[i];
         if (!look.changed) continue;
@@ -378,6 +467,15 @@ void hud_looks(PPCContext& ctx, uint8_t* base) {
         entry_styles(base, value, look.styles, true);
         look.changed = false;
     }
+}
+
+void command_history_looks(PPCContext& ctx, uint8_t* base) {
+    const uint32_t history = select_value(ctx, base, hud_value(0)), gauge = select_value(ctx, base, hud_value(1));
+    if (!history || !gauge || load(base, gauge + kValueDefault) != 0) return;
+    uint32_t styles[2];
+    entry_styles(base, gauge, styles, false);
+    ppc::st32(base, history + kValueDefault, 0);
+    entry_styles(base, history, styles, true);
 }
 
 // The ULTIMATE SETTINGS submenu opens: HUD Information's texts and values become
@@ -459,8 +557,11 @@ PPC_FUNC(sub_05FBC0A4); // the camera (r3) of a side (r4 = 2: 2P; f1 = 1, r5 = 1
 // The fighters' frame (not while the pause menu is open): the chord can
 // happen, and the frame data panels follow the fighters.
 PPC_FUNC(sub_03ADB118_orig);
+bool g_fighters_ran = false; // in the battle frame that ran last
+
 PPC_FUNC(sub_03ADB118) {
     const bool in_practice = practice(base);
+    g_fighters_ran = true;
     if (in_practice) os::arm_select_chord(three_held(base));
     sub_03ADB118_orig(ctx, base);
     close_submenu(ctx, base); // (left by closing the pause menu)
@@ -471,8 +572,28 @@ PPC_FUNC(sub_03ADB118) {
     }
 }
 
+// SLOW MOTION: while the fighters are in play, the battle's frame (the
+// fighters, their pushing and knockback, the camera, effects, the HUD) runs
+// every second (1/2) or fourth (1/4) frame only, the title showing the same
+// scene in between, as Smash Bros.' training mode steps its frames. Held
+// together, nothing moves against anything else. The pad steps with it
+// (os::set_input_step): the frames that run are those after a read the
+// game saw change, with every press made since, so none is lost (Start
+// opens the pause menu; a fighter's buttons register). The pause menu, also
+// run from the battle's frame, keeps its speed: the frames are held only
+// after one whose fighters ran.
+bool battle_frame_held() {
+    static constexpr uint32_t kEvery[] = {1, 2, 4};
+    const uint32_t every = kEvery[std::min(title::framedata::setting(title::framedata::kSlowMotion), 2u)];
+    const bool stepping = every > 1 && g_fighters_ran;
+    os::set_input_step(stepping ? every : 1);
+    return stepping && !os::input_step_delivered();
+}
+
 PPC_FUNC(sub_0726DF8C_orig);
 PPC_FUNC(sub_0726DF8C) {
+    if (practice(base) ? battle_frame_held() : (os::set_input_step(1), false)) return;
+    g_fighters_ran = false;
     if (g_submenu_in) take_settings(ctx, base); // (the battle state runs on in the pause menu)
     if (os::take_select_chord() && practice(base)) {
         const bool reverse = load(base, kPracticeSettings + kReverse) == 1;
@@ -543,6 +664,7 @@ PPC_FUNC(sub_085AA2D8) {
         g_submenu_in = true;
     } else if (hud) {
         hud_looks(ctx, base);
+        command_history_looks(ctx, base);
     }
     // ULTIMATE SETTINGS' unused rows hidden; shown again for HUD Information (they
     // stay as set across frames).
@@ -598,6 +720,31 @@ PPC_FUNC(sub_027741EC) { // (r3 the fighter, r4 the slot, r5 the move)
 
 
 // ------------------------------------------------------------ COMMAND HISTORY
+// The input history is on to begin with: the practice settings' defaults
+// (sub_04F1F270, r3 the settings: as the game starts, and the pause menu's
+// DEFAULT) have COMMAND HISTORY (+48) on, and so does a Practice round as it
+// starts (the saved settings are copied in before). Its row in HUD Information takes
+// the looks of a row whose default is on (HEALTH GAUGE's: its default
+// cursor and its entries' texts), so that ON is drawn green as the default.
+PPC_FUNC(sub_04F1F270_orig);
+PPC_FUNC(sub_04F1F270) {
+    const uint32_t settings = ctx.r[3];
+    sub_04F1F270_orig(ctx, base);
+    ppc::st32(base, settings + kHudWords, 1);
+}
+
+// A Practice round starts (sub_04F2544C: the HUD set up from the settings),
+// its settings as saved: the input history on, whatever the save has (it
+// can be turned off for the session), and its pause menu value too, which
+// the menu has filled from the saved settings already (closing the menu
+// would read it back).
+PPC_FUNC(sub_04F2544C_orig);
+PPC_FUNC(sub_04F2544C) {
+    ppc::st32(base, kPracticeSettings + kHudWords, 1);
+    sub_04F2544C_orig(ctx, base);
+    if (load(base, kMenusMade)) call(ctx, base, sub_04F9FB6C, {0, hud_value(0)});
+}
+
 // The title turns its command history bar on with sub_04F1EDAC (r3 the
 // practice HUD, r4 1: bit 0 of its +4 set, then the bar started), from the
 // practice settings' COMMAND HISTORY word (+48) as a round starts and from
@@ -610,4 +757,3 @@ PPC_FUNC(sub_04F1EDAC) {
     ctx.r[4] = 0;
     sub_04F1EDAC_orig(ctx, base);
 }
-

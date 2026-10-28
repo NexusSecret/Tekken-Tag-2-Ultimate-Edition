@@ -22,6 +22,14 @@ namespace {
 std::mutex g_input_mutex;
 GamepadState g_gamepad{};
 uint32_t g_previous_hold = 0;
+// set_input_step: reads to the next one the game sees change, buttons
+// pressed meanwhile.
+// It lasts a while unless set again (the mode sets it every frame; when its
+// frames stop, the pad goes back to usual).
+uint32_t g_step_every = 1, g_step_reads = 0, g_step_pressed = 0;
+bool g_step_delivered = true;
+std::chrono::steady_clock::time_point g_step_until{};
+constexpr auto kStepLasts = std::chrono::milliseconds(250);
 
 // TTT2_INPUT_SCRIPT="15:plus,20.5:a,22:down" presses each button at the given
 // second after start-up, for unattended runs: for a fifth of a second and at
@@ -263,7 +271,16 @@ int32_t VPADRead(int32_t channel, VPADStatus* status, uint32_t count, be<int32_t
     GamepadState state = g_gamepad;
     state.buttons |= scripted_buttons();
     state = movement_state(state);
-    const uint32_t hold = gate_select(state.buttons);
+    uint32_t hold = gate_select(state.buttons);
+    if (g_step_every > 1 && std::chrono::steady_clock::now() > g_step_until) g_step_every = 1;
+    g_step_delivered = g_step_every <= 1 || ++g_step_reads % g_step_every == 0;
+    if (!g_step_delivered) {
+        g_step_pressed |= hold;
+        hold = g_previous_hold;
+    } else {
+        hold |= g_step_pressed;
+        g_step_pressed = 0;
+    }
     status->hold = hold;
     status->trigger = hold & ~g_previous_hold;
     status->release = g_previous_hold & ~hold;
@@ -347,6 +364,20 @@ void arm_select_chord(bool partner_held) {
     g_chord.armed_until = Clock::now() + kChordArmed;
     g_chord.partner = partner_held;
     ++g_chord.armings;
+}
+
+void set_input_step(uint32_t every) {
+    std::lock_guard lock(g_input_mutex);
+    g_step_until = std::chrono::steady_clock::now() + kStepLasts;
+    if (every == g_step_every) return;
+    g_step_every = std::max(every, 1u);
+    g_step_reads = 0;
+    if (g_step_every == 1) g_step_delivered = true;
+}
+
+bool input_step_delivered() {
+    std::lock_guard lock(g_input_mutex);
+    return g_step_delivered;
 }
 
 bool take_select_chord() {

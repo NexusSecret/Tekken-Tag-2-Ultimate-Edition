@@ -14,6 +14,7 @@ State g_state;
 Clock::time_point g_until;
 std::deque<std::shared_ptr<const Window>> g_recent; // newest first
 constexpr size_t kRecent = 6;
+uint64_t g_generation = 0;
 
 } // namespace
 
@@ -30,6 +31,7 @@ void show(std::vector<Quad> quads, double seconds, std::shared_ptr<const Scene> 
     g_state.quads = std::move(shared);
     g_state.scene = std::move(scene);
     if (window) {
+        ++g_generation;
         g_recent.push_front(window);
         if (g_recent.size() > kRecent) g_recent.pop_back();
     } else {
@@ -44,6 +46,11 @@ State current() {
     State s = g_state;
     if (Clock::now() >= g_until) s.quads = nullptr, s.scene = nullptr, s.window = nullptr;
     return s;
+}
+
+uint64_t window_generation() {
+    std::lock_guard lock(g_mutex);
+    return g_generation;
 }
 
 std::vector<std::shared_ptr<const Window>> recent_windows() {

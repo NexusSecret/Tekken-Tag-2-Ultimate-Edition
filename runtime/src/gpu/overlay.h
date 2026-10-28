@@ -70,5 +70,9 @@ State current(); // the quads, solids and window only while they are to be drawn
 // The windows shown lately, newest first: the frame the renderer renders
 // again may be one or two older than the newest, its camera matrix theirs.
 std::vector<std::shared_ptr<const Window>> recent_windows();
+// Counts the windows shown: the renderer draws the window's view again only
+// for a new one (not for frames the fighters' frame did not run in, such as
+// the pause menu's first, which takes its picture of the scene).
+uint64_t window_generation();
 
 } // namespace cafe::gpu::overlay

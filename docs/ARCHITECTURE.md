@@ -591,9 +591,17 @@ No marker for CLEAN was found, so that badge stays dim. The
 practice settings object (`0x108D1C60`) holds Action 1 at +4 (4: GUARD
 ALL), the HUD Information rows at +48 to +76 (COMMAND HISTORY, HEALTH GAUGE,
 DAMAGE INFO 1 and 2, COMBO INFO, HIT INFO, ATTACK PROPERTIES, HIT ANALYSIS;
-1 = on) and Counter at +80; the panels move up above DAMAGE INFO 2's bars
-along the bottom when those are on.
+1 = on) and Counter at +80; the panels stand above the hint line along the
+bottom, where DAMAGE INFO 2's bars also go.
 
+COMMAND HISTORY is on to begin with: the practice settings' defaults
+(`sub_04F1F270`, r3 the settings: as the game starts, for the pause menu's
+DEFAULT) set it on, and as a Practice round starts (`sub_04F2544C`, after
+the saved settings were copied in) the port sets it on again, its pause
+menu value too (the menu fills its values from the saved settings before
+the round starts and reads them back as it closes). It can be turned off
+for the session. Its row in HUD Information has the default cursor and
+entry texts of a row whose default is on (HEALTH GAUGE's), so ON is green.
 COMMAND HISTORY shows an input history after Tekken 8's in place of the
 title's bar along the bottom. The title turns its bar on with
 `sub_04F1EDAC` (r3 the practice HUD at `0x108D1D50`, r4 1: bit 0 of its
@@ -622,6 +630,18 @@ ANALYSIS on, a blue one (0.2, 0.4, 0.8 at `0x1030CD70`) while the fighter's
 +1161 byte is 0. The port returns one of its own two instead for the
 fighters it colours (1.7, 0.2, 0.2 and 0.25, 0.4, 1.8), until a quarter of a
 second after the last fighters' frame, so not once Practice is left.
+
+The position reset has a hint of its own at the bottom right, on the
+line where the title puts its hints (Defensive Training's "Select +
+button: Start", at the left: 23 pixels high at y 643 to 666 of the TV
+image): Select's icon and 3's button picture from the main font's texture
+with the port's icons for the controller in use (neutral or PlayStation,
+`font::neutral_icons`/`playstation_icons`), "+" and "Reset Position" in
+the label font outlined as the title outlines its hints. The panels and
+the top view stand above that line (their bottom at y 634, whether DAMAGE
+INFO 2's bars are on or not; those bars share the line). The title's own
+hints stay where its HUD movie puts them: their place is in that movie's
+data, not found (its text is kept as glyphs, not as a string).
 
 The panels are pictures over the title's image (`gpu/overlay.h`): quads in
 the TV image's 1280 × 720 coordinates from one RGBA atlas, which the
@@ -725,6 +745,33 @@ heights and angles), the bodies' nearest surfaces only (their depths in a
 first pass, then their colours where those are nearest, blended once),
 the lines last, without depths.
 
+SLOW MOTION (OFF, 1/2, 1/4) holds the battle's frame (`sub_0726DF8C`,
+which runs the fighters, their pushing and knockback, the camera, effects
+and the HUD) on all but every second or fourth frame while the fighters
+are in play, the title showing the same scene in between, as Smash Bros.'
+training mode steps its frames. Holding only the fighters' frame
+(`sub_03ADB118`) made them wiggle: the rest of the battle frame went on
+moving them (pushing apart, knockback) at full speed. The pad steps with
+it (`os::set_input_step`): VPADRead shows a change on every second or
+fourth read only, with every button pressed since (one pressed and let go
+in between as held for that read), and the frames that run are those after
+such a read, so no press is lost (Start opens the pause menu at 1/4; on a
+held frame it went unseen). The stepping lasts a quarter of a second
+unless set again each battle frame, so the pad goes back to usual when the
+battle's frames stop; the pause menu, run from the battle's frame too,
+keeps its speed, as frames are held only after one whose fighters ran.
+Its row (ATTACK PROPERTIES') has three values where that row has two: its
+select value's entries (a vector at +348/+352/+356, 40 bytes each) are the
+port's three while the row is ULTIMATE SETTINGS', the row's own put back
+before its looks (the title frees them). An entry's text is the menu's
+text kind and id at +32 and +36 (the value as drawn, with its arrows and
+its colour in the text's control codes: U+FFF2 and two code units, FF20
+FF20 green at the row's default, FF20 FFFF yellow otherwise; read through
+`sub_045590E0`), or, with both 0, its own string (inline at +4 up to 15
+bytes, else at the pointer at +20, its length at +24, room at +28): OFF is
+the row's own green OFF, 1/2 and 1/4 its yellow ON's text with the word
+changed. (What the port called the entries' styles are these text ids.)
+
 TOP CAMERA shows the fight from straight above in a window between the
 panels while the main camera stays as it is: over the fighters' middle,
 their line across the window with 1P's end on the left (up, the way away
@@ -751,7 +798,11 @@ replay and put back after it: later frames may read one without writing
 it first (the pause menu keeps the picture of the scene it opened over,
 and showed it from above). A replay in which the camera was not found
 (a frame rendered from the pause menu's camera, as it closes) keeps the
-window's last picture. The title culls its scene for its own camera, so
+window's last picture. Only frames that showed a new window are replayed
+(`overlay::window_generation`): not a held slow-motion frame, nor the
+pause menu's first frame, which takes its picture of the scene (replaying
+it on Fallen Garden left a 256 x 256 corner of the stage's work target, in
+its purple, in that picture). The title culls its scene for its own camera, so
 what that camera could not see is missing from above (the floor is
 whole); 2D effects the CPU places on the screen stay where they are on it.
 (Writing the matrix into the render camera itself at the end of each
