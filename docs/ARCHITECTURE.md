@@ -75,7 +75,8 @@ Implemented in host C++, no guest-code interpretation:
    SPIR-V at run time; tiled surfaces are detiled.
 3. **snd_core / snd_user → host audio**: AX voices mixed natively and
    played through SDL3 (see the audio section below).
-4. **vpad / padscore → SDL3 gamepad**.
+4. **vpad / padscore → SDL3 gamepads and the keyboard**: the GamePad, and
+   up to four Pro Controllers for other players (below, *Players*).
 5. **nsysnet / nlibcurl / nn_\***: offline stubs.
 
 Cemu and decaf-emu were references for the system's and the GPU's behaviour,
@@ -442,6 +443,27 @@ renderer swaps them in (`gpu/replacements.h`): a texture whose level 0 has a
 registered MD5 loads the current set as RGBA8 instead, and loads again when
 the controller changes (`host::on_controller_change`: the kind of the last
 gamepad pressed, SDL's PS3/PS4/PS5 and Switch types).
+
+**Controller pictures** (`title/controllers.*`, `title/pictures.*`). The
+player entry screen pictures each controller that joined: the GamePad's,
+Pro Controller's, Wii Remote's and Classic Controller's, white on its stand
+in the middle (320x220), lit red or cyan on a player's side (1P, 2P) and
+small (168x104), in pages 12 to 18 of the screen's texture sets (data007
+FB833313 and 82DCEE9A, alike but for some pages' texts). The GamePad's
+pictures show the device on the GamePad (while every device drives it,
+the one used last) and the Pro Controller's that on the first Pro
+Controller: a keyboard, a PlayStation-style or an Xbox-style controller
+(any other gamepad) drawn here, or, for a Nintendo controller, the
+title's Pro Controller. The drawings are signed distance shapes, white
+with grey lines like the title's; the lit ones are made from them as the
+title's are, measured: outside, a glow of the side's colour (FC0000,
+00D9F9) whose alpha falls from about 190 at the edge to none 14 pixels
+out; inside, a tint (FF0000, 00FFFF) mixed in 46 % at the edge and nothing
+26 pixels in. The small ones are the pictures at 0.465 of the size, the
+body's thickness showing below in a pale blue grey, on a soft black oval.
+The pages are made when a picture's device changes, drawn beside the
+title's start (some tens of milliseconds), and swapped in through
+`gpu/replacements.h` like the icons.
 
 **Fonts** (`title/font.*`). A glyph table (`NFH`) holds the font's size in
 pixels at +4 and the glyph count at +8 (little- or big-endian, by font),
@@ -1275,6 +1297,41 @@ layout (GTK 4.18's, else that of the last key pressed that every layout
 defines). Saving writes through a link to where it leads, keeping that
 file's mode.
 
+**Players** (`host/window.cpp`, `os/input.cpp`, `title/controllers.cpp`).
+The title takes one player's input from the controller that pressed + on
+its title screen (a Pro Controller cannot move the menus the GamePad
+opened), so the keyboard and every gamepad drive the GamePad, as one
+player's, everywhere but in the modes for several players. Those (VS
+Battle, Team Battle, Pair Play) begin on a player entry screen ("Press the
+controller's +"), which the title builds for the Wii U's GamePad, Pro
+Controllers and Wii Remotes. There the first device to press + takes the
+GamePad and every other one that presses + the next Pro Controller, and
+each player drives only their own; devices that have not pressed + drive
+the GamePad until it is taken. The title offers VS Battle and Pair Play
+only while a controller other than the GamePad is connected, so each
+device beyond the first (the keyboard counts) keeps a Pro Controller
+connected, idle until a device takes it. Every offline mode loads the screen's
+layouts (data007 794FFCD9 and FA2AD1D0) as it starts, which begins a
+session; the mode manager (`*(*(*0x10872CB8 + 228) + 228)`, its kind at
++444) tells the rest. VS Battle shows the screen inside its mode (kind 9);
+Team Battle and Pair Play show it with no mode, and start theirs (14, and
+0 as Arcade) once the players have joined; the other modes start at once
+(Arcade 0, Practice 4 and 5, Survival 10, Time Attack 11, Ghost Battle 12)
+with no one joined, which ends the session. When the menus are back (kind
+6) every device drives the GamePad again and the Pro Controllers
+disconnect. A press of + by a second device within 100 ms of one that took
+a controller takes none (a controller that shows as two devices, as beside
+Steam's virtual gamepad). The title reads
+the Pro Controllers with `KPADReadEx` (`KPADStatus`, 0xF0 bytes: the
+extension's kind at 0x5C, 0x1F for a Pro Controller, which it counts as
+device kind 14; WPAD's data format at 0x5F, 22; the buttons by WPAD's
+Pro Controller bits from 0x60, the sticks from 0x6C); a Pro Controller just
+connected shows no buttons for three reads, so that the title has seen it
+connect before the + that connected it (held for four reads after). Its
+WPAD calls (`WPADRead`, `WPADProbe`) belong to an older library of the
+title's (core Wii Remote, Nunchuk and Classic Controller only) that
+nothing runs.
+
 How the game starts comes from `$XDG_CONFIG_HOME/ttt2/display.ini` (the
 same folder rule), read once by `open_window` before the window is made
 (`runtime/src/host/display_settings.cpp`, without SDL: the launcher builds
@@ -1362,7 +1419,7 @@ ignores. Renderer debugging:
 | `TTT2_CAPTURE=<dir>` | TV/GamePad images as PNG every `TTT2_CAPTURE_INTERVAL` seconds (default 5) |
 | `TTT2_CAPTURE_SEQUENCE=<n>` | with `TTT2_CAPTURE`, also every image shown for the next n frames after each capture, in order (`seq_<capture>_<frame>_<n>.png`, the real image last) |
 | `TTT2_TRACE_AT=<s>`, `TTT2_TRACE_FRAME=<n>` | log every command of one frame; with `TTT2_CAPTURE`, save all its render targets |
-| `TTT2_INPUT_SCRIPT="25:plus,26.5:a"` | press GamePad buttons at given seconds, for unattended runs (`@<hash>` items wait for an archive entry) |
+| `TTT2_INPUT_SCRIPT="25:plus,26.5:a"` | press GamePad buttons at given seconds, for unattended runs (`@<hash>` items wait for an archive entry; `30:plus#2` presses on Pro Controller 1, `#3`-`#5` the others, connected for the run) |
 | `TTT2_TRACE_ENTRIES=1` | every archive entry the title reads, with times |
 | `TTT2_TRACE_ROSTER=1` | the added fighter's entries |
 | `TTT2_DUMP_SHADERS=<dir>` | shader binaries, draw registers and generated GLSL |
@@ -1389,6 +1446,8 @@ ignores. Renderer debugging:
 | `TTT2_TRACE_PRACTICE=1` | each position reset in Practice |
 | `TTT2_TRACE_INPUT_DELAY=1` | each input delay the fighters' queues get (a mode's start, Practice's Input Delay) |
 | `TTT2_CONTROLLER=playstation/nintendo/xbox` | icons and menu buttons for this kind of controller |
+| `TTT2_DEVICES=keyboard,playstation,...` | the devices the controller pictures show, for the GamePad and Pro Controllers 1-4 (`keyboard`, `playstation`, `xbox`, `nintendo`) |
+| `TTT2_TRACE_PLAYERS=1` | modes for several players starting and ending, and each device taking a controller |
 
 The launcher (`launcher/app`, `ttt2-launcher`) runs by itself for tests,
 through the same code as its buttons (only the file pickers and the
