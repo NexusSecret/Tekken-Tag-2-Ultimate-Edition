@@ -17,8 +17,8 @@ import types
 
 from . import InputError, pack, shared, source as sources
 from .characters import CHARACTERS, GAMES, definition, game_of
-from .convert import art, chains, cloth, effects as fx, face, idmaps, itemdb, model, move_overrides, movelist, \
-    moveset, outfits, particles, tagsystem, tiger, voice, weapons
+from .convert import art, chains, cloth, effects as fx, face, idmaps, itemdb, model, movelist, moveset, outfits, particles, \
+    tagsystem, tiger, voice, weapons
 from .tekken7 import tkmvst
 from .tekken7.autodump import FILES
 from .tekken7.pak import EncryptedError, Paks, pak_names
@@ -355,6 +355,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
         moves, motions, xml, effect_files, mvl = _converted_moveset(source.paks, archives, d, slot, place, own_moveset,
                                                                     heihachi, donor_xml, effect_files, wins, vlist,
                                                                     voice_extra, opt_anims, part3, bon, log, step)
+
     lids = face.tekken7_lids(tkmvst.face_animations(own_moveset)) if own_moveset is not None else None
     moves, motions, changed, lid_scales = face.retarget(moves, motions, bone.read(bon),
                                                         bone.read(archives.read_name(d.DONOR + '.bon')), lids)
@@ -430,14 +431,15 @@ def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, e
     mvl = None
     if k.movelist[:4] == b'MVLT':
         step('command list')
-        mvl = movelist.convert(k.movelist, log=lambda s: log('         ' + s),
-                               bounds=move_overrides.command_bounds(c))     # the definition's bounds' icons
+        mvl = movelist.convert(k.movelist, log=lambda s: log('         ' + s))
     return moves, motions, xml, effect_files, mvl
 
 
 def _options(c, archives, d, wins, vlist, voice_extra, tag_states, bon):
     """What moveset.Converter c takes from the import besides the movesets (both games): the definition's gameplay
     options' reference movesets, the win quotes' tones, the shouts' count, the movement states, the hit locations."""
+    if d.MOVESET.get('electric_tag_exit'):
+        c.electric_pack = archives.entry('data005', 13)
     c.air_reaction_references = {spec[0]: motbin.read(archives.entry('data006', spec[0]))
         for spec in d.MOVESET.get('air_reactions', {}).values() if isinstance(spec, tuple)}
     if 'air_reaction_reference' in d.MOVESET:
@@ -461,12 +463,14 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
     voices8: the TTT2 voice of each of its moves' Tekken 8 voices (tekken8/voice.py's move_voices on the banks the
     voice step built)."""
     from .tekken8 import anim, anmbin, motbin as motbin8, movelist as movelist8, movenames, voice as voice8
+    from .convert import move_overrides
     k, files, references = saved
 
     def sub(s):
         log('         ' + s)
     step('moveset: %s\'s move names from TTT2\'s movesets' % d.NAME)
     ttt2_movesets = movenames.ttt2_movesets(archives)
+    movenames.name_known(k, [n.encode('ascii') for n in d.MOVESET.get('move_name_seeds', ())])
     movenames.name_moves(k, ttt2_movesets, log=sub)
     dictionary = movenames.harvest(ttt2_movesets)[0]
     others = []
@@ -529,9 +533,11 @@ def _converted_tekken8_moveset(source, archives, d, place, saved, donor_xml, eff
 
     step('command list')
     mvl = None
+    entries = {key: (hit, d.MOVESET['bounds'][name])
+               for key, (name, hit) in d.MOVESET.get('bound_entries', {}).items()}
     try:
         mvl = movelist8.convert(_read(files['mvl']), source.store, log=sub,
-                                bounds=move_overrides.command_bounds(c))     # the definition's bounds' icons
+                                bounds=move_overrides.command_bounds(c), bound_entries=entries)     # the definition's bounds' icons
     except (OSError, ValueError, KeyError, IndexError, struct.error) as error:
         sub('WARNING: the command list could not be converted (%s): Practice shows %s\'s' % (error, d.DONOR))
     if mvl is None:

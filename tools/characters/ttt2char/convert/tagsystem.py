@@ -5,14 +5,12 @@ Tekken 7 has no tag, and TTT2 keeps its tag system in the movesets, as moves and
 * Tag Assault: a TTT2 bound move X (a hit condition on 467) has a cancel on the tag button during its startup into a
   twin XT: X with a hit condition on 468 in front (its reaction bounces the opponent for the partner) and a cancel on
   that hit into XDA, X's animation without a hit, whose properties bring the partner in (its Co_Change_Kam takes the
-  tag-in kind 11) while it returns to the stance. The converter makes the definition's bound moves bounds
-  (move_overrides.py) but has no XT or XDA to give them: add_tag_assault makes both, after the donor's own triples
-  (assault_template).
-* Bounds: bound_shape gives the donor's bound entry and what its air hit plays once the bound is used. Where TTT2 has
-  a bound, Tekken 7 often has an air slam instead (the same move of Heihachi's in both games: [614 airborne -> slam]
-  [614 -> air][default] in Tekken 7, [467 -> bound][466 -> air][default] in TTT2); the id maps make the slam the bound
-  reaction without the 467 test, so it would bound on every air hit (TTT2 has no such entry): the converter plays the
-  air hit after a bound for it instead.
+  tag-in kind 11) while it returns to the stance. The converter makes Tekken 7's screws bounds but has no XT or XDA
+  to give them: add_tag_assault makes both, after the donor's own triples (assault_template).
+* Bounds: where TTT2 has a bound, Tekken 7 often has an air slam instead (the same move of Heihachi's in both games:
+  [614 airborne -> slam][614 -> air][default] in Tekken 7, [467 -> bound][466 -> air][default] in TTT2); the id maps
+  make the slam the bound reaction without the 467 test, so it bounds on every air hit (TTT2 has no such entry).
+  gated_slam gives such entries TTT2's shape.
 * Tag Crash: a juggled fighter plays its reactions from the ATTACKER's moveset (sub_041570D8), and TTT2's landing
   reactions have a cancel on 2 + tag held, the partner in Rage, into the tag crash just before their tech (ukemi)
   rows, and one on tag into the plain tag-out after them. landing_template / add_landing_rows give the converted
@@ -156,6 +154,19 @@ def same_reaction(tables, a, b):
     return tables['reactions'][a]['default'] == tables['reactions'][b]['default']
 
 
+def gated_slam(tables, entry, before, bound_req, bound_reaction, after_reaction, alone):
+    """A Tekken 7 air slam's hit-condition entry (converted: its 466 requirement list, the bound reaction) -> TTT2's
+    entries for it: [467 -> bound][the air entry], as TTT2 Heihachi's same moves have (alone: Tekken 7 has no air
+    entry after the slam (Negan's, Geese's, Noctis's): the air entry made, with the donor's reaction after a bound);
+    after a bound entry already in the list (`before`, the entries converted so far), only the air entry."""
+    if any(has(tables, e['req'], BOUND) for e in before):
+        return [dict(entry, reactions=after_reaction)]
+    out = [dict(entry, req=bound_req, reactions=bound_reaction)]
+    if alone:
+        out.append(dict(entry, reactions=after_reaction))
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ Tag Assault
 def triples(tables, aliases):
     """The donor's Tag Assault moves: [(X, XT, XDA, X's tag row, XT's exit row)] (move indices and cancel rows)."""
@@ -295,7 +306,7 @@ def twin(x, tpl, kind):
     return out
 
 
-def add_tag_assault(tables, tpl, first, name_of, string):
+def add_tag_assault(tables, tpl, first, name_of, string, finish_hit=()):
     """Every converted bound move X (move index >= first: a 467 hit condition, no 468 one, no tag cancel, active from
     frame 2 on) gets TTT2's Tag Assault after `tpl` (assault_template): its tag row (in a new list: X's rows, the tag
     row, X's end row) into XT, appended with XDA. name_of(i): move i's name; string(s): the name's string offset.
@@ -341,8 +352,18 @@ def add_tag_assault(tables, tpl, first, name_of, string):
         # block, outside the active frames or under further conditions. Before it, a row taken on the hit (or on its
         # frame) would leave XT with the opponent bounced for the partner and the partner never coming in
         keep = [dict(c) for c in body if is_automatic(c)] if tpl['layout'] != 'alone' else []
-        first_ = [c for c in keep if row_kind(tables, c) in tpl['before']]
-        then = [c for c in keep if row_kind(tables, c) not in tpl['before']]
+        if name_of(i) in finish_hit:
+            # A T8 string finisher can have unconditional stance-property rows
+            # active from frame one. In its tagged twin they must not preempt
+            # the attack or native contact handoff. The untagged move is intact.
+            for c in keep:
+                c['win_start'] = max(c['win_start'], la + 1)
+            keep = [c for c in keep if c['win_start'] <= c['win_end']]
+            first_, then = [], keep
+        else:
+            first_ = [c for c in keep if row_kind(tables, c) in tpl['before']]
+            then = [c for c in keep if row_kind(tables, c) not in tpl['before']]
+
         xt['cancel'] = write(tables, 'cancels', first_ + [exit_] + then + [dict(end)])
         xda = twin(x, tpl, 'XDA')
         xda['name'] = name(name_of(i) + 'DA')
@@ -362,6 +383,41 @@ def add_tag_assault(tables, tpl, first, name_of, string):
         moves += [xt, xda]
         made.append((i, xt_i, xda_i))
     return made
+
+
+def add_tag_assault_strings(tables, made, routes):
+    """Opt-in string input + Tag -> the finisher's native Tag Assault twin.
+
+    Keep input timing/contact gates and the ordinary string row intact. A tag
+    pressed with the next attack otherwise fails that row's exact button mask.
+    Only explicit source/target pairs are changed; no generic extra cancels.
+    """
+    twins = {x: xt for x, xt, _ in made}
+    added = 0
+    for parent, targets in routes.items():
+        rows = cancels(tables, tables['moves'][parent]['cancel'])
+        out, found = [], set()
+        for row in rows:
+            target = row['move_id']
+            if target in targets:
+                if target not in twins:
+                    raise ValueError('string finisher has no Tag Assault twin')
+                button = row['button']
+                if not button & 0xf or button & ~0x4000000f:
+                    raise ValueError('unsupported Tag Assault string input mask')
+                tag = next(c for c in cancels(tables, tables['moves'][target]['cancel'])
+                           if c['button'] == TAG_BUTTON and c['move_id'] == twins[target])
+                conditions = reqs(tables, row['req'])
+                conditions += [x for x in reqs(tables, tag['req']) if x not in conditions]
+                guard = write(tables, 'requirements', [dict(condition=c, param=p) for c, p in conditions]
+                              + [dict(condition=TT_END, param=0)])
+                out.append(dict(row, button=button | 0x100, req=guard, move_id=twins[target]))
+                found.add(target); added += 1
+            out.append(dict(row))
+        if found != set(targets):
+            raise ValueError('Tag Assault string continuation was not found')
+        tables['moves'][parent]['cancel'] = write(tables, 'cancels', out)
+    return added
 
 
 # ------------------------------------------------------------------------------------------------ Tag Crash
@@ -525,6 +581,68 @@ class TagStates:
         if e:
             return e[True] > 0 and e[True] >= e[False]
         return state_name(name) in self.common
+
+
+def preserve_grounded_screw_bound(tables, move_name):
+    """Grounded Screw launches start a juggle without spending its Bound.
+
+    T7's 0x8255 becomes TTT2's 0x8193. Keep that mapping for airborne
+    Screw/Bound reactions, but omit it from the distinct grounded launch
+    reactions used by counter hits. Copy property lists because they can be shared.
+    """
+    names = {'sDw_screwL', 'sDw_screwR', 'sDw_screwLL', 'sDw_screwLR',
+             'sDw_screwRL', 'sDw_screwRR'}
+    changed = []
+    props = tables['extra_move_properties']
+    for i, move in enumerate(tables['moves']):
+        if move_name(i) not in names or move['extraprops'] is None:
+            continue
+        rows = []
+        for row in props[move['extraprops']:]:
+            rows.append(dict(row))
+            if row['frame'] == 0:
+                break
+        kept = [row for row in rows if row['id'] != 0x8193]
+        if len(kept) != len(rows):
+            move['extraprops'] = len(props)
+            props.extend(kept)
+            changed.append(i)
+    return changed
+
+
+def restore_running_contacts(tables, move_name, donor_tables, donor_name):
+    """Retain native running collision exits lost to T7-only requirement 640.
+
+    Copy the donor's generic tackle/body-check rows and gates, never its own
+    running attacks. Repoint new lists so shared cancel/requirement rows survive.
+    """
+    names = {move_name(i): i for i in range(len(tables['moves']))}
+    donor = {donor_name(i): i for i in range(len(donor_tables['moves']))}
+    restored = 0
+    for name in ('sRUN__01F', 'sRUN__02F', 'sRUN__03F'):
+        if name not in names or name not in donor:
+            continue
+        move = tables['moves'][names[name]]
+        rows = [dict(r) for r in cancels(tables, move['cancel'])]
+        changed = False
+        for original in cancels(donor_tables, donor_tables['moves'][donor[name]]['cancel']):
+            target = donor_name(original['move_id']) if original['move_id'] < len(donor_tables['moves']) else ''
+            if not is_automatic(original) or target not in ('Co_runtac00', 'Co_runspA00') or target not in names:
+                continue
+            required = reqs(donor_tables, original['req'])
+            if any(r['move_id'] == names[target] and is_automatic(r) and reqs(tables, r['req']) == required for r in rows[:-1]):
+                continue
+            row = dict(original, move_id=names[target])
+            row['req'] = write(tables, 'requirements', [dict(condition=c,param=p) for c,p in required] +
+                               [dict(condition=TT_END,param=0)])
+            if original['extradata'] is not None:
+                row['extradata'] = write(tables, 'cancel_extras', [dict(donor_tables['cancel_extras'][original['extradata']])])
+            rows.insert(len(rows)-1,row)
+            restored += 1
+            changed = True
+        if changed:
+            move['cancel'] = write(tables,'cancels',rows)
+    return restored
 
 
 # ------------------------------------------------------------------------------------------------ idle variants

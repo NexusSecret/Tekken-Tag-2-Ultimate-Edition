@@ -1,5 +1,6 @@
 """Character opt-ins for special inputs (the tag combos of launchers: tagcombo.py)."""
 from . import idmaps as M, tagsystem as TS
+from ..ttt2 import motion
 
 SEQ0 = 0x800D
 # The fighter's game's ids these rules read in its moveset (Tekken 7's; Tekken 8's are their counterparts in the id
@@ -89,6 +90,80 @@ def apply(c):
         c.T['cancels'] += added + body[:end + 1]
         c.stats['special input cancels restored'] += len(added)
 
+    exit_id = electric_exit(c) if rules.get('electric_tag_exit') else None
+    for source, template in rules.get('tag_launchers', {}).items():
+        donor = c.d.tables['moves'][c.dn[template]]
+        rows = [row for row in M.cancels(c.d, donor['cancel'])
+                if M.reqs(c.d, row['req']) == [(47, 0), (481, 0)]]
+        if len(rows) != 1:
+            raise ValueError('no unique tag launcher template: ' + template)
+        move = c.T['moves'][c.newidx[c.kn[source]]]
+        # Electric's native startup/early-recovery tag window ends eight frames
+        # after its last active frame (He_shoryu_S: 12 -> 20).
+        electric = c.h2.tables['moves'][next(i for i in range(len(c.h2.tables['moves']))
+                                           if c.h2.move_name(i) == 'He_shoryu_S')]
+        native = next(row for row in M.cancels(c.h2, electric['cancel'])
+                      if M.reqs(c.h2, row['req']) == [(47, 0), (481, 0)])
+        tag = dict(rows[0], win_end=move['last_active'] + native['win_end'] - electric['last_active'])
+        if source in rules.get('tag_launcher_air_only', ()):
+            req = M.reqs(c.d, rows[0]['req']) + [(466, 0)]
+            tag['req'] = len(c.T['requirements'])
+            c.T['requirements'] += [dict(condition=a, param=b) for a, b in req]
+            c.add('requirements', dict(condition=M.END_REQ['ttt2'], param=0))
+        if exit_id is not None:
+            tag['move_id'] = exit_id
+        # The native exit, its animation, requirements and extra (188) all
+        # already belong to the donor. Insert before automatic follow-ups.
+        body = list(c.T['cancels'][move['cancel']:])
+        end = next(j for j, row in enumerate(body) if row['direction'] == M.LIST_END)
+        move['cancel'] = len(c.T['cancels'])
+        c.T['cancels'] += [tag] + body[:end + 1]
+        c.stats['tag launcher cancels added'] += 1
+
+
+def electric_exit(c):
+    """Copy the Electric's native exit and animation, translating table links."""
+    h = c.h2
+    src = next(m for i, m in enumerate(h.tables['moves']) if h.move_name(i) == 'He_shoryu_SChg')
+    def requirements(index):
+        start = len(c.T['requirements'])
+        c.T['requirements'] += [dict(condition=a, param=b) for a, b in M.reqs(h, index)]
+        c.add('requirements', dict(condition=M.END_REQ['ttt2'], param=0))
+        return start
+    def target(i):
+        return i if i >= 0x8000 else c.dn[h.move_name(i)]
+    row = dict(src)
+    row['name'] = c.string(c.defn.MOVESET.get('tag_exit_name', 'Akuma_DP_TagExit'))
+    pack = c.electric_pack
+    off, size = motion.pack_items(pack)[0]
+    _, offsets = motion.mota_offsets(pack, off)
+    index = src['anim'] & 0x3fff
+    start = offsets[index]
+    stop = min((x for x in offsets if x > start), default=size)
+    row['anim'] = 0x4000 | (c.pack0_count + len(c.new_anims))
+    c.new_anims.append(pack[off + start:off + stop])
+    row['hit_condition'] = c.d.tables['moves'][c.dn['La_StormgearChg']]['hit_condition']
+    row['cancel'] = len(c.T['cancels'])
+    for cancel in M.cancels(h, src['cancel']):
+        value = h.tables['cancel_extras'][cancel['extradata']]['value']
+        extra = c.extra_index.get(value)
+        if extra is None:
+            extra = c.add('cancel_extras', dict(value=value))
+            c.extra_index[value] = extra
+        c.T['cancels'].append(dict(cancel, req=requirements(cancel['req']),
+                                   extradata=extra, move_id=target(cancel['move_id'])))
+    row['transition'] = target(src['transition'])
+    row['extraprops'] = len(c.T['extra_move_properties'])
+    index = src['extraprops']
+    while index is not None:
+        p = h.tables['extra_move_properties'][index]
+        c.T['extra_move_properties'].append(dict(p))
+        if p['id'] == 0:
+            break
+        index += 1
+    row['anim_name'] = c.string('amkz_shonige_change(DVD)')
+    return c.add('moves', row)
+
 
 # Verified against TTT2's executable: requirement 307 reads fighter+0x63c
 # (0x04057000); property 0x8093 writes that same word (0x03af338c).
@@ -133,9 +208,19 @@ def buffered_special(c, source, targets):
             continue
         code = next((b for a, b in values if a == ids['special'] and b), None)
         contact = next((a for a, _ in values if a in ids['contact']), None)
+        contact = contact or (353 if c.game == 't7' and (353, 1) in values else None)
         if code is None or (contact is None and source not in
                             c.defn.MOVESET.get('noncontact_special_cancels', ())):
             continue
+        if c.defn.MOVESET.get('strict_special_cancel_gates'):
+            allowed = {346, 49, 50, 353, 0x81c8, 0x8069, 0x8068}
+            if c.defn.MOVESET.get('free_meter_specials'):
+                allowed.add(629)
+            if c.defn.MOVESET.get('free_max_mode'):
+                allowed.add(176)
+            if any(a not in allowed or (a in (49, 50, 176) and b != 0)
+                   or (a == 353 and b != 1) for a, b in values):
+                raise ValueError('unsupported special dispatch gates: ' + source)
         codes.add(code)
         capture_ends[code] = max(capture_ends.get(code, 0), min(32767, row['win_end'] + late))
         checks = [(SPECIAL_VAR, code)]
@@ -153,6 +238,13 @@ def buffered_special(c, source, targets):
         is_sequence = SEQ0 <= row['direction'] < SEQ0 + len(c.k.tables['input_sequences'])
         if not is_sequence and not (row['direction'] < 0x400 and row['button']):
             continue
+        if c.defn.MOVESET.get('strict_special_cancel_gates'):
+            allowed = {346, 0x80c5, 0x822b}
+            if c.defn.MOVESET.get('free_max_mode'):
+                allowed.add(176)
+            if any(a not in allowed or (a in (346, 176) and b != 0)
+                   or (a == 0x822b and b != 1) for a, b in values):
+                raise ValueError('unsupported special capture gates: ' + source)
         # These are input-only rows: native 0x2800 runs requirement actions
         # without leaving the normal. Never add a hit/block gate here.
         sequence = c.conv_seq(row['direction'] - SEQ0) if is_sequence else None
@@ -217,7 +309,7 @@ def restore_unbuffered_normal_strings(c):
     if special is None:
         return
     for name, i in c.kn.items():
-        if name in explicit or name in buffered:
+        if name in explicit or (name in buffered and not c.defn.MOVESET.get('buffered_normal_followups')):
             continue
         index = c.newidx.get(i, getattr(c, 'dn', {}).get(name))
         if index is None:
@@ -233,7 +325,9 @@ def restore_unbuffered_normal_strings(c):
             target = c.k.resolve_alias(row['move_id'])
             if target not in c.newidx:
                 continue
-            contacts = (46, 47) if any(pid in contact_tests for pid, _ in values) else (None,)
+            contact_gated = any(pid in contact_tests for pid, _ in values)
+            contacts = ((CONTACT_VAR,) if contact_gated else (None,)) if name in buffered else (
+                (46, 47) if contact_gated else (None,))
             for contact in contacts:
                 key = (row['direction'], row['button'], c.newidx[target], row['win_start'], row['win_end'],
                        row['start_frame'], contact)
@@ -241,8 +335,10 @@ def restore_unbuffered_normal_strings(c):
                     continue
                 seen.add(key)
                 rq = len(c.T['requirements'])
+                if name in buffered:
+                    c.add('requirements', dict(condition=SPECIAL_VAR, param=0))
                 if contact is not None:
-                    c.add('requirements', dict(condition=contact, param=0))
+                    c.add('requirements', dict(condition=contact, param=1 if contact == CONTACT_VAR else 0))
                 c.add('requirements', dict(condition=M.END_REQ['ttt2'], param=0))
                 extra = c.extra_index.get(0x182)
                 if extra is None:

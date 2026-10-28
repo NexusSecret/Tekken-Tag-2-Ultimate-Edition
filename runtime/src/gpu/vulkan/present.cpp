@@ -1,3 +1,4 @@
+#include <pthread.h>
 // Presentation: finished frames go to the window from a thread of their own.
 //
 // The command processor copies the TV scan buffer into one of a few

@@ -138,6 +138,60 @@ dumps from the debugging options under `local/` too.
 
 ## The launcher
 
+### Windows launcher
+
+**Starting from a downloaded project ZIP (Windows 10/11, x64):**
+
+1. Download this branch as a ZIP and **Extract All** into a writable folder.
+2. Double-click **Start Ultimate Launcher.cmd** in that folder. The first start
+   downloads and verifies a private Python/Tk runtime. No Python installation,
+   Git installation, terminal commands or second project download are needed.
+3. Click **Set Up Game**, select your own European Wii U TTT2 `.wua` containing
+   update v16, and choose an installation folder.
+4. Leave setup running while it downloads missing tools, prepares libraries,
+   checks your game executable, builds and installs the Windows game.
+5. Click **Play** when setup completes. To add fighters, open Steam, close T7/T8,
+   select fighters and use **Import / Update selected**. Reina requires Tekken 8.
+
+The first setup needs internet, a Vulkan-capable graphics driver, an x86-64-v3
+CPU and substantial free disk space for the tools, generated build and game.
+It can take a while; keep the extracted project folder for future updates.
+Downloads are private to ignored `local/` folders. Python, LLVM-MinGW and MinGit
+archives are SHA-256 pinned; Python packages are version pinned. Existing
+project files are reused; the game and its assets are never downloaded.
+Setup logs remain under the selected data folder. The game archive is kept.
+
+
+The Windows build also produces `build-windows-tools/ttt2-launcher.exe`.
+This opens a separate Windows interface; the GTK launcher and Linux build/import
+paths are unchanged. The ZIP startup path obtains private Python/Tk automatically; developer launches
+can also use an installed Python 3 with Tcl/Tk. Setup obtains numpy and Pillow. Set `TTT2_PYTHON`
+to a Python executable to override automatic discovery.
+
+The Windows interface provides Play, Build/Rebuild, Install, Update installed game,
+individual fighter import/update/removal (including Reina), selectable game/data/
+pack/save/tool paths, display settings, a keyboard.ini editor, import cancellation,
+and persistent task/game logs. It calls the existing Windows build scripts,
+native installer, and shared character importer. Set Up Game prepares the build tools automatically from the extracted project.
+Keep the project folder for rebuilds. The compiled launcher executable can also
+be opened from its build folder after setup.
+
+It detects the existing development archive, extracted title, fighter packs,
+saves, and CMake toolchain. Use **Paths**, then **Save paths**, to change them.
+Development configuration is saved in ignored `local/windows-launcher.json`;
+other layouts use `%LOCALAPPDATA%/TTT2Ultimate/launcher.json`. The data folder must
+end in `TTT2Ultimate` so runtime settings and launcher settings use the same place.
+Explicit fighter/save paths are passed to both the game and importer. Packs
+marked **Update available** still load: this compares revisions from the shared
+importer and never automatically rebuilds anything.
+
+Task/game logs are saved under the selected data folder's `logs/` directory;
+startup errors are saved beside the executable in `launcher.log`. Build/install
+tasks finish before the window closes. Import cancellation requests cleanup and
+keeps completed extraction data. This frontend does not implement AppImage
+self-updates, the GTK key-capture screen, or the Linux uninstall interface.
+
+
 `ttt2-launcher` (**Ultimate Launcher**) does the installing and
 the adding of fighters in a window, without a terminal. **Install…** asks for
 your `.wua` and a folder, checks the PC, builds the game program for it from
@@ -153,7 +207,7 @@ before acting on a button, and its keyboard keys ([Playing](#playing)). Its
 Characters section shows where Steam has Tekken 7 and Tekken 8, or why one cannot be used, and a part for each game's
 fighters (the installed game's first), with **Add** per fighter: Tekken 7's with **Add All** and its DLC
 fighters in a list that opens, with those your Steam account owns and **Add
-All Owned**; Tekken 8's (Reina) without Tekken 7 or any of its fighters. **Remove** takes one out again. A
+All Owned**; Tekken 8's (Reina, Azucena) without Tekken 7 or any of its fighters. **Remove** takes one out again. A
 Tekken 8 fighter whose moves could not be saved from Tekken 8 (a game update its helper does not know yet, or
 nothing to run it hidden) is added with Heihachi's moves, says so and why, and is offered as an update once
 their own can be saved. What all added fighters share is made from each one's own game, so while one game is
@@ -387,8 +441,7 @@ and hits with it, Noctis summons his swords, daggers, spear and shield for the
 moves that use them, Leroy's cane and Master Raven's sheathed katana are where
 they carry them, and the moves that hit with a weapon (Kunimitsu II's blades
 too) reach as far as the weapon. Left out for now: Rage Arts and Rage Drives,
-power crush armour (those moves are there, without it), screws (a screw move
-juggles as it does in Tekken 7 once the screw is used),
+power crush armour (those moves are there, without it), Screw becomes Bound,
 the weapons they take in hand only for some moves (Kunimitsu II's blades,
 Master Raven's drawn sword, Leroy's folding staff, Negan's knife), the weapons
 of Noctis's Rage Art, Katarina's and Leroy's sunglasses, and Gigas's back
@@ -401,33 +454,30 @@ system needs: they tag out (and have tag throws) while walking, dashing,
 stepping back, crouching or crouch walking, as Tekken Tag Tournament 2's own
 fighters do; press Tag during a bound move's startup (before it hits) for a
 Tag Assault, and their juggles give the Tag Crash input on landing (2+Tag
-with the partner in Rage). Tekken 7 has no bound either: the bound moves are
-the ones the Tekken 7 Bound Mod gives each fighter (and Akuma's d/f+1+2 and
-Noctis's jump 1+2), and each bounds once per juggle, as Tekken Tag Tournament
-2's own do. Screws are no bounds, and neither are Tekken 7's slams outside
-that list: they play the air hit Tekken Tag Tournament 2 plays once a
-juggle's bound is used. Inputs in Tekken 7's notation (WR while rising, WS
-while standing up, SS sidestep, BT back turned, FC full crouch):
+with the partner in Rage). Many of Tekken Tag Tournament 2's bounds are
+slams in Tekken 7 that bounce on every air hit; those bound once per juggle,
+as Tekken Tag Tournament 2's own do (right column). Inputs in Tekken 7's
+notation (WR while rising, SS sidestep, BT back turned, FC full crouch):
 
-| Fighter | Bound moves |
-|---|---|
-| Kazumi | d/b+1+2; d/f+1,2; f,F+4; 3,2; u/f+3,4,1; Fearless Warrior 3 |
-| Lucky Chloe | 1,2,2; f+2,2; d/f+3,2; b+2; f+4,4; u+3+4; BT 3,3+4; Left Twist 3 |
-| Eliza | f,F+4,2; b+1,2,4; b+1+2; d,d/b,b+3; EX Moon Glide 1+2 |
-| Claudio | f+2,1; f+4; f+1+2,1+2; b+3,3; b+4,3,2; b+1+2; u/f+2; f,F+2,2 |
-| Akuma | f+1+2; d/f+1+2; d/f+1,2; f,F+4; WS 4,4; Hyakkishu (f,d,d/f+3 or 4) 2 |
-| Gigas | d+2; f+2,1,1; f+1+2; d/f+1+2; d/f+4,1+2; b+4; b+1+2; WS 4,2; 10-hit string (its 8th hit) |
-| Josie | d+2; u/f+3; f,n,d,d/f+1+2; Switch Stance 1 |
-| Katarina | 1,1,1; 1,1,3; 3,3,3,3,3; d+1; f+3; f+1+2; b+4,1+2; u/f+4,4; u/f+3+4; f,f,f+3; Harrier 2 |
-| Master Raven | b+1; b+1+2,2; u/b+1,2; u+3,d+3,3; u/f+3+4,f+4,3; FC d/f+3+4,4; BT f+2,3; Haze 4 |
-| Shaheen | 4,4; b+1; b+3; f+3+4; u/f+3 |
-| Fahkumram | d+1; d+3+4; f+3+4; u/f+1; d/f+2,1; d/f+1,4,1; d/f+4,3,3; f,F+4,1 |
-| Leroy | d+1+2; u/f+3+4,1+2; Hermit f+4; Hermit b+1 |
-| Lidia | d+1; b+1,2; f+4,3,1; u/f+3; SS 2; Cat Foot Stance I 4; Pouncing Tiger, Stalking Wolf 4 |
-| Kunimitsu II | d+1; d/f+1+2; d/f+1,2,2; f,F+4,2; d,d/f,f+2; WS 1,1; Setsunagake 1,2,3 |
-| Negan | d+2; 1,2,2; b+2,2; b+1+2; d/f+3,1,2; Intimidation 2; Intimidation 2+3 |
-| Geese Howard | 1,2,1; b+2; d/f+3,4,2; d,d/b,b+2,3 (and its EX version) |
-| Noctis | WS 1,2; WR 1+2; d/f+4,2,2; d+4,1,1+2; b+3,1; b+1+4; u/f+2; SS 2; jump 1+2; Jump Peak 1+2 |
+| Fighter | Bound moves | Slams in Tekken 7, bounds here |
+|---|---|---|
+| Kazumi | f+4; b+2; 3,1; u/f+3,4,3; b,f+2,1,4; WR 4,4 | d/f+1,2; d/b+1+2; f+3+4,3; u/f+3,4,1 |
+| Lucky Chloe | 1+2; 1,2,1+2; f+2,1+2; BT 1+2; d/f+3,3; b+3; FC d/f+2; d/f+2,4,3,1; 10-hit string | 1,2,2; f+2,2; BT 3,3+4; d/f+3,2; f,f,f+3; b+2 |
+| Eliza | 4; f,f,f+1; b+3,1; d,d/b,b+1; Moon Glide 1,4 / 3,4 | u/f+4,2; b+1,2 |
+| Claudio | f+2,2; 4,3; 2,1,2; f+3; b+1; b+4,1; WR 1,2 | b+1+2; b+4,3,2; b+3,3; f,F+2,2; jump 2 |
+| Akuma | f+4; 4,3; Hyakkishu (f,d,d/f+3 or 4) 3 | Hyakkishu 2; f,f,f+3+4 |
+| Gigas | f+2,f+1; d/f+2,1; d/b+3,2; Golem Set Up 4,1; SS 2 | f+2,1,1; d+2; b+1+2; WR 4,2; d/f+4,1+2 |
+| Josie | 3,3; b+1,1; f+2,3,4; f,F+4; 1,2,d+4,4; 2,d+4,4; 3+4; f,n,d,d/f+1,3 | jump f+3; d+2; d/f+4,1; b+3+4,f,1+2 |
+| Katarina | 2,2; 3,4 (also WR); d/f+2,4; f,F+4; Harrier d/f+2,3; f,F+2,4 | f+4,2; f+4,u/f+3; f,F+3; d+1; u/f+3+4; b+4,3+4; f,f,f+3+4; 1+2,1,3; 3,3,3,3,3 |
+| Master Raven | b+4,4; d/f+2,3; b+2,4,2; BT f+2,4,2; 2,4; f+1+2; 4,3,3; WR 3+4; BT b+3; BT f+4,3 | b+1; b+4,b+4; BT 3,4,4; jump f+3+4 |
+| Shaheen | 4,3; f+2,4,4; f+4; d/f+3; Stealth Step 4,1 | 4,4; b+1; f,f,f+3+4; Stealth Step 3 |
+| Fahkumram | 3,4,4; f+3,2,4,4; WR 2,4,4; 4,3,1; 1,2,4,3,1; 2,4,3,1; d+3,4,3,1; f,F+4; b+3; d/f+1,4 | b,f+3+4; d/f+2,1; d/f+4,3,3 |
+| Leroy | 1,2,3; f+4,4; b+3; b+4; Hermit 2,1; Hermit f+1 | Hermit b+1; d+1+2 |
+| Lidia | 1,2,3; 1,2,4,4; 4,3; f+4,3,4; d/f+4,3; d/f+4,4; d/f+3+4; d+3,4; b+4,4,4; b+3+4,3; u/f+4; SS 4; Cat Foot 3; 10-hit string | f+3+4,4; f+4,3,1; d+1+2 |
+| Kunimitsu II | 1,1,1; 3,4; Katon 4,2; f+2,3; Setsunagake 1,2,1; f,n,d,d/f+2; f+3,2; f+3,1,2; f+3+4; b+2; WR 2,4 | d,d/f,f+2; f,F+4,2; d/f+1,2,2; d+1+2; 1,1,4; Setsunagake 1,2,4; f+3,1,2,4 |
+| Negan | d/b+1+2 (also held); d/f+1,1,2; b+1,2; SS 2; Intimidation 1,2 / 1+2 | f+1,2,1+2; 2,2,2,2; b+2,2; b+1+2; d/f+3+4,1,2; Intimidation 2,3 |
+| Geese Howard | 4; d/f+2; b+4,4; WR 3; f,d,d/f+1 / +2 | d,d/b,b+2,3 (and its EX version) |
+| Noctis | 1,2,1+2; 2,2,f+2; 1+2; f+4,2; d/f+1,4; d/f+4,2,4; d/f+1+2; d+2,2; u/f+4; u+4; f,F+1+2; WR 2,2 | u+2; u/f+2; jump 1+2; b+2+3; b+1+4; d+4,1,1+2; d/f+4,2; f,f,f+1+2 |
 
 ## How it works
 
@@ -532,8 +582,7 @@ built into the `ttt2` program). The port also links SDL3 (zlib), shaderc
   whose research documented the Tekken 7 and TTT2 moveset layouts, their
   animations and what their requirement and property ids mean, which the
   character importer builds on (its movesets are in TKMovesets2's .tkmvst
-  layout, which it can also read); the Tekken 7 Bound Mod, whose choice of
-  bound moves the added Tekken 7 fighters have;
+  layout, which it can also read);
   [UE Viewer](https://github.com/gildor2/UEViewer) and
   [CUE4Parse](https://github.com/FabianFG/CUE4Parse), for Tekken 7's Unreal
   Engine 4.14 packages. The importer's code is its own.

@@ -126,6 +126,8 @@ VOICE_PREFIX = 'vp'           # her intro and win lines' events in Tekken 7's ba
 # the id maps: Heihachi's moveset in both games, and her generic moves against some TTT2 fighters' (importer.py)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', 42), ('heihachi', 9), ('self', 23)]
 MOVESET = {
+    # Match Noctis d/b+2 on counter hit only; retain normal-hit behavior.
+    'counterhit_reactions': {'Vp_6rkrk': 'sDw_utuharai_r'},
     'name': '[ELIZA]',
     # Her low kick exists, but the imported neutral dispatcher omits d+4.
     'jump_special_inputs': ('Vp_jp214lk', 'Vp_jp214rk', 'Vp_jp214wk'),
@@ -133,8 +135,7 @@ MOVESET = {
     # tag combos (convert/tagcombo.py) besides her launchers: Moon Glide 3,3 (its hit on a standing opponent is no
     # launch; until 2026-10-26 it tagged out with Jun's Ju_s_tlkChg animation, now with its own)
     'tag_combos': {'Vp_66lklk': True},
-    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
-    'bounds': dict.fromkeys(('Vp_4lprprk', 'Vp_4lrp2', 'Vp_9lrp2', 'Vp_9rkrp', 'Vp_shoryuC'), True),
+    'bounds': {'Vp_6rklkrk': False, 'Vp_rk00': False, 'Vp_shoryulprk': False, 'Vp_shoryuCDEX2': False, 'Vp_jp214wk_chak': False},  # Moon Glide 3,4 (Helical Flow)
     # Replace T7 extended-point references with native arm capsules. The
     # original 0x8213 parameters identify hand 13 (Storm) / 9 (Tempest).
     'hitboxes': {

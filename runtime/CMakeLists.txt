@@ -1,4 +1,7 @@
-find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
+set(TTT2_INSTALL_SOURCE src/install.cpp)
+if(NOT WIN32)
+    find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
+endif()
 find_package(ZLIB REQUIRED)
 
 # Linked as objects, not an archive: strong import implementations here must
@@ -32,7 +35,7 @@ add_library(cafe_runtime OBJECT
     src/os/hardware.cpp
     src/vfs.cpp
     src/wua.cpp
-    src/install.cpp
+    ${TTT2_INSTALL_SOURCE}
     src/gpu/command_processor.cpp
     src/gpu/display.cpp
     src/gpu/null_backend.cpp
@@ -71,8 +74,14 @@ target_compile_features(cafe_runtime PUBLIC cxx_std_20)
 find_package(Vulkan REQUIRED)
 find_package(SDL3 REQUIRED CONFIG)
 # GLSL -> SPIR-V at run time.
-find_library(SHADERC_LIBRARY NAMES shaderc_shared REQUIRED)
-target_link_libraries(cafe_runtime PUBLIC cafe_rpx cafe_title OpenSSL::Crypto ZArchive::zarchive amd_addrlib cafe_latte
+if(WIN32)
+    target_include_directories(cafe_runtime PRIVATE ${CMAKE_SOURCE_DIR}/third_party/shaderc/libshaderc/include)
+    target_link_libraries(cafe_runtime PUBLIC bcrypt winpthread ole32 shell32 uuid)
+else()
+    find_library(SHADERC_LIBRARY NAMES shaderc_shared REQUIRED)
+    target_link_libraries(cafe_runtime PUBLIC OpenSSL::Crypto)
+endif()
+target_link_libraries(cafe_runtime PUBLIC cafe_rpx cafe_title ZArchive::zarchive amd_addrlib cafe_latte
     Vulkan::Vulkan SDL3::SDL3 ${SHADERC_LIBRARY})
 # Vulkan structures are initialised with only their sType.
 target_compile_options(cafe_runtime PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)

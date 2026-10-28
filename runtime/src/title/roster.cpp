@@ -1,4 +1,8 @@
 #include "title/roster.h"
+#include "title/eliza_assist.h"
+#include "title/noctis_assault.h"
+#include "title/noctis_hitbox.h"
+#include "title/damage_scaling.h"
 #include "outfit_menu.h"
 
 #include "cafe/ppc_ops.h"
@@ -350,6 +354,9 @@ struct Pack {
 
 fs::path packs_directory() {
     if (const char* dir = std::getenv("TTT2_CHARACTERS"); dir && *dir) return dir;
+#ifdef _WIN32
+    if (const char* data = std::getenv("LOCALAPPDATA"); data && *data) return fs::path(data) / "TTT2Ultimate/characters";
+#endif
     if (const char* data = std::getenv("XDG_DATA_HOME"); data && *data) return fs::path(data) / "ttt2/characters";
     const char* home = std::getenv("HOME");
     return fs::path(home ? home : ".") / ".local/share/ttt2/characters";
@@ -429,7 +436,7 @@ std::optional<Pack> read_pack(const fs::path& directory) {
                          std::all_of(pack.code.begin(), pack.code.end(), [](char c) { return c >= 'a' && c <= 'z'; });
     if (!code_ok || pack.donor.empty()) {
         std::fprintf(stderr, "ttt2: warning: %s needs a three-letter `code` and a `donor`; skipped\n",
-                     (directory / "character.ini").c_str());
+                     (directory / "character.ini").string().c_str());
         return std::nullopt;
     }
     std::error_code ec;
@@ -450,7 +457,7 @@ std::optional<Pack> read_pack(const fs::path& directory) {
                 ((static_cast<size_t>(header[6]) << 8) | header[7]) == pack.outfits.size();
         if (!valid) {
             std::fprintf(stderr, "ttt2: warning: %s: invalid/incomplete outfit sets; using the default costume\n",
-                         directory.c_str());
+                         directory.string().c_str());
             pack.outfits.clear();
         }
     }
@@ -613,7 +620,7 @@ std::vector<std::string> serve_raw(const std::map<std::string, std::map<uint32_t
     std::vector<std::string> failed;
     for (const auto& [name, map] : raw) {
         if (vfs::set_archive_entries(name, map)) continue;
-        std::fprintf(stderr, "ttt2: warning: %s: its entries of %s could not be added\n", from.c_str(), name.c_str());
+        std::fprintf(stderr, "ttt2: warning: %s: its entries of %s could not be added\n", from.string().c_str(), name.c_str());
         failed.push_back(name);
     }
     return failed;
@@ -659,7 +666,7 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
         } else if (f.name.size() < 4 ||
                    (f.name.compare(f.name.size() - 4, 4, ".mop") != 0 &&
                     (f.name.size() < 10 || f.name.compare(f.name.size() - 10, 10, ".havok.xml") != 0))) {
-            std::fprintf(stderr, "ttt2: warning: neither %s nor its donor has %s\n", pack.directory.c_str(),
+            std::fprintf(stderr, "ttt2: warning: neither %s nor its donor has %s\n", pack.directory.string().c_str(),
                          f.name.c_str());
             return false;
         }
@@ -737,11 +744,11 @@ void add_shared(const fs::path& directory) {
         if (!contents) continue;
         if (!add_title_copy(located, name, *key, *contents, entries, raw)) {
             std::fprintf(stderr, "ttt2: warning: %s: %s does not fit the title's entry; left out\n",
-                         directory.c_str(), name.c_str());
+                         directory.string().c_str(), name.c_str());
         }
     }
     if (!vfs::set_archive_entries("content/hdd/data100", entries)) {
-        std::fprintf(stderr, "ttt2: warning: %s could not be added\n", directory.c_str());
+        std::fprintf(stderr, "ttt2: warning: %s could not be added\n", directory.string().c_str());
         return;
     }
     const auto failed = serve_raw(raw, directory);
@@ -1251,7 +1258,7 @@ void prepare_roster() {
             at.push_back(&pack);
         } else {
             std::fprintf(stderr, "ttt2: warning: %s: all %d places of added fighters are taken; skipped\n",
-                         pack.directory.c_str(), kMaxFighters);
+                         pack.directory.string().c_str(), kMaxFighters);
         }
     }
     outfit_menu::CodeOwners codes;
@@ -1270,35 +1277,35 @@ void prepare_roster() {
         const Pack& pack = *at[k];
         if (codes.conflicts(k)) {
             std::fprintf(stderr, "ttt2: warning: %s: duplicate fighter/outfit code; skipped\n",
-                         pack.directory.c_str());
+                         pack.directory.string().c_str());
             continue;
         }
         if (pack.format < kPackFormat) {
             std::fprintf(stderr,
                          "ttt2: warning: %s was made by an older importer (pack format %d, this game loads %d): add "
                          "it again (the launcher offers it); skipped\n",
-                         pack.directory.c_str(), pack.format, kPackFormat);
+                         pack.directory.string().c_str(), pack.format, kPackFormat);
             continue;
         }
         if (pack.format > kPackFormat) {
             std::fprintf(stderr,
                          "ttt2: warning: %s was made by a newer importer (pack format %d, this game loads %d): "
                          "update the game; skipped\n",
-                         pack.directory.c_str(), pack.format, kPackFormat);
+                         pack.directory.string().c_str(), pack.format, kPackFormat);
             continue;
         }
         const auto donor = fighter_id(pack.donor);
         const auto donor_row = donor ? motion_row(*donor) : std::nullopt;
         if (!donor || *donor >= 59 || !donor_row) {
             std::fprintf(stderr, "ttt2: warning: %s: no fighter `%s` to borrow from; skipped\n",
-                         pack.directory.c_str(), pack.donor.c_str());
+                         pack.directory.string().c_str(), pack.donor.c_str());
             continue;
         }
         if (fighter_id(pack.code) || std::any_of(g_added.begin(), g_added.end(), [&](const Added& a) {
                 return a.active && a.code == pack.code;
             })) {
             std::fprintf(stderr, "ttt2: warning: %s: the code `%s` is a fighter's already; skipped\n",
-                         pack.directory.c_str(), pack.code.c_str());
+                         pack.directory.string().c_str(), pack.code.c_str());
             continue;
         }
         Added& added = g_added[k];
@@ -1335,7 +1342,7 @@ void prepare_roster() {
         }
         if (added.outfits.size() != pack.outfits.size()) continue;
         if (!add_entries(pack, *donor_row, k)) {
-            std::fprintf(stderr, "ttt2: warning: %s could not be added\n", pack.directory.c_str());
+            std::fprintf(stderr, "ttt2: warning: %s could not be added\n", pack.directory.string().c_str());
             continue;
         }
         added.code_string = guest_string(pack.code);
@@ -1345,14 +1352,22 @@ void prepare_roster() {
             added.column = kCells[k].column;
             added.grid_row = kCells[k].row;
         } else {
-            std::fprintf(stderr, "ttt2: warning: %s: no free cell left in the select grid\n", pack.directory.c_str());
+            std::fprintf(stderr, "ttt2: warning: %s: no free cell left in the select grid\n", pack.directory.string().c_str());
         }
         patch_title(k);
         prepare_art(pack, k, directory / "shared");
         prepare_costumes(pack, *donor, k);
         g_active = true;
-        std::fprintf(stderr, "ttt2: added the fighter %s from %s (id %u)\n", pack.code.c_str(), pack.directory.c_str(),
+        std::fprintf(stderr, "ttt2: added the fighter %s from %s (id %u)\n", pack.code.c_str(), pack.directory.string().c_str(),
                      added.id);
+    }
+    // Optional additions to a native fighter use the same archive overlay as
+    // shared art. Load them even when no added roster fighters are installed.
+    const auto armor = directory / "native" / "aki";
+    if (fs::is_regular_file(armor / "patch.json", ec) &&
+        fs::is_regular_file(armor / "keys" / "da52b90f.bin", ec) &&
+        fs::is_regular_file(armor / "keys" / "f1e8d23d.bin", ec)) {
+        add_shared(armor);
     }
     if (!g_active) return;
     add_shared(directory / "shared");
@@ -3271,6 +3286,39 @@ void pose_weapons(PPCContext& ctx, uint8_t* base, uint32_t model, uint32_t playe
             }
         }
     }
+    // Preserve df4,2's working blade capsule. Its otherwise-unused second
+    // sphere gets a separate point below the tip, only during this move.
+    // The ordinary weapon guard point is refreshed above on every pose.
+    const int slot = slot_of_id(load(player + kPlayerSelectId));
+    const uint32_t move = load(player + 280);
+    const char* name = move && load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "";
+    if (slot >= 0 && (written & 8) && noctis_hitbox::lower_wall_point(g_added[slot].code, name)) {
+        const uint32_t tip = player + kPlayerItemPoints + 12 * 3;
+        const auto low = noctis_hitbox::below_tip({loadf(tip),loadf(tip+4),loadf(tip+8)});
+        const uint32_t spare = player + kPlayerItemPoints + 12;
+        storef(spare,low.x);storef(spare+4,low.y);storef(spare+8,low.z);
+        // Temporary wall-miss trace: sample collision geometry without changing it.
+        const int frame = static_cast<int>(loadf(load(player + kPlayerAnimator) + kAnimatorFrame));
+        static std::map<uint32_t, int> last_trace_frame;
+        if (last_trace_frame[player] != frame) {
+            last_trace_frame[player] = frame;
+            if (frame >= 17 && frame <= 23) {
+                const uint32_t foe = load(player + 0x98);
+                std::fprintf(stderr, "noctis-wall move=%s frame=%d player=%08X foe=%08X tip=%.1f,%.1f,%.1f low=%.1f,%.1f,%.1f\n",
+                    name, frame, player, foe, loadf(tip),loadf(tip+4),loadf(tip+8),low.x,low.y,low.z);
+                const uint32_t foe_skeleton = foe ? guest_call(ctx, base, sub_04E1A4C8, {foe}) : 0;
+                const uint32_t foe_records = foe_skeleton ? load(foe_skeleton + kSkeletonRecords) : 0;
+                if (foe_records) {
+                    std::fprintf(stderr, "noctis-wall defender id=%u move=%08X bones=", load(foe+kPlayerSelectId),load(foe+280));
+                    for (int b=0;b<22;++b) {
+                        const uint32_t at=foe_records+kRecordSize*b+kRecordWorld+48;
+                        std::fprintf(stderr," %d:%.1f,%.1f,%.1f",b,loadf(at),loadf(at+4),loadf(at+8));
+                    }
+                    std::fprintf(stderr,"\n");
+                }
+            }
+        }
+    }
 }
 
 } // namespace
@@ -3426,6 +3474,108 @@ void arc_property(uint32_t player, uint32_t id, uint32_t value) {
 }
 } // namespace
 
+namespace {
+std::map<uint32_t, damage::HitGrabContinuation> g_warp_strike_scaling;
+std::string_view damage_move_name(uint32_t player) {
+    const uint32_t move = player ? load(player + kPlayerMove) : 0;
+    return move && load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "";
+}
+bool trace_noctis_player(uint32_t player) {
+    if (!player || !std::getenv("TTT2_TRACE_NOCTIS_AIR")) return false;
+    const int k = slot_of_id(load(player + kPlayerSelectId));
+    return k >= 0 && g_added[k].code == "mrz";
+}
+bool trace_noctis_air(uint32_t player) {
+    return trace_noctis_player(player) && damage_move_name(player).starts_with("Mz_jprp");
+}
+void trace_noctis_air_step(uint32_t player) {
+    if (!trace_noctis_player(player)) return;
+    static std::map<uint32_t, std::array<uint32_t, 6>> last;
+    const bool active = trace_noctis_air(player);
+    const std::array<uint32_t, 6> state = {load(player + kPlayerMove), load(player + kPlayerFrame),
+        load(player + 0x7f0), load(player + 0x63c), load(player + 0x628), load(player + 0x800)};
+    if (!last.count(player) || (last[player] != state && (active || last[player][0] != state[0]))) {
+        std::fprintf(stderr,"noctis-air FRAME player=%08X name=%.*s frame=%u held=%08X input_latch=%u hit_latch=%u lock=%u y=%.1f vy=%.1f owner=%u assist=%u\n",
+            player, int(damage_move_name(player).size()), damage_move_name(player).data(), state[1],state[2],
+            state[3],state[4],state[5],loadf(player+kPlayerY),loadf(player+kPlayerVy),
+            load(player+0x1e80),load(player+0x1e88));
+    }
+    last[player] = state;
+}
+}
+
+// Geese has a character-specific grounded combo curve in T7's executable,
+// rather than in its MVLT/move damage rows. TTT2 has no corresponding fighter.
+// Keep its native hit accounting/reset logic, then scale this hit's output
+// before sub_03AE15D8 copies it into the defender's health-damage fields.
+PPC_FUNC(sub_04E184D0);
+PPC_FUNC(sub_04E18548);
+PPC_FUNC(sub_03AE1704_orig);
+PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
+    const uint32_t defender = ctx.r[3], attacker = ctx.r[4], result = ctx.r[5];
+    const int k = attacker ? slot_of_id(load(attacker + kPlayerSelectId)) : -1;
+    if (!defender || !result) {
+        sub_03AE1704_orig(ctx, base);
+        return;
+    }
+    const uint32_t flags = load(result + 0x3c);
+    uint32_t percent = 100;
+    auto& warp = g_warp_strike_scaling[defender];
+    const bool noctis = k >= 0 && g_added[k].code == "mrz";
+    if (load(result + 0x40) != 4) {
+        warp.clear(); // any intervening collision invalidates the continuation
+        if (noctis && damage_move_name(attacker) == "Mz_rp00F" &&
+            (flags & 0x00200000u) && !(flags & 0x80000000u)) {
+            // sub_03AE1704 @03AE1C30 uses this defender counter and table.
+            // Preserve the initiating hit's native curve through the forced
+            // victim state, whose flat property otherwise bypasses the curve.
+            const uint32_t count = load(defender + 0x1cc);
+            const uint32_t native_percent = count <= 8 ? load8(0x101ce884 + count) : 30;
+            warp.remember(attacker, native_percent);
+        }
+    } else if (noctis && damage_move_name(defender) == "Mz_rp01F_n") {
+        if (const uint32_t inherited = warp.take(attacker)) percent = inherited;
+    }
+    if (k >= 0 && g_added[k].code == "mry" &&
+        damage::ground_hit(flags, load8(defender + 0x36b))) {
+        const uint32_t stats = guest_call(ctx, base, sub_04E184D0, {attacker});
+        const uint32_t prior_hits = stats ? load(stats + 0x50) : 0;
+        percent = damage::geese_ground_percent(prior_hits);
+    }
+    std::array<int32_t, 4> before;
+    for (size_t i = 0; i < before.size(); ++i) before[i] = static_cast<int32_t>(load(result + 0x2c + 4 * i));
+    sub_03AE1704_orig(ctx, base);
+    // Narrow diagnostic for the optional native Armor King wall-throw graft.
+    const auto ak_attacker_move = damage_move_name(attacker);
+    const auto ak_defender_move = damage_move_name(defender);
+    if (ak_attacker_move == "Knk_#2247" || ak_attacker_move == "Knk_#2248" ||
+        ak_defender_move == "Knk_#2247" || ak_defender_move == "Knk_#2248") {
+        std::fprintf(stderr,"armor-wall DAMAGE attacker=%08X move=%.*s defender=%08X victim=%.*s kind=%u flags=%08X combo_count=%u pending_kind=%u pending_points=%u dealt=%d scale=%u\n",
+            attacker,int(ak_attacker_move.size()),ak_attacker_move.data(),
+            defender,int(ak_defender_move.size()),ak_defender_move.data(),
+            load(result+0x40),flags,load(defender+0x1cc),load8(defender+0x487),
+            load(defender+0x4a4),static_cast<int32_t>(load(result+0x2c))-before[0],percent);
+    }
+    if (trace_noctis_air(attacker))
+        std::fprintf(stderr,"noctis-air HIT player=%08X name=%.*s frame=%u defender=%08X victim=%.*s kind=%u flags=%08X damage=%d\n",
+            attacker,int(damage_move_name(attacker).size()),damage_move_name(attacker).data(),
+            load(attacker+kPlayerFrame),defender,int(damage_move_name(defender).size()),
+            damage_move_name(defender).data(),load(result+0x40),flags,
+            static_cast<int32_t>(load(result+0x2c))-before[0]);
+    if (percent == 100) return;
+    // The result contains four accumulated damage channels. Scale only the
+    // contribution just computed, retaining earlier hits and native modifiers.
+    for (size_t i = 0; i < before.size(); ++i) {
+        const uint32_t at = result + 0x2c + 4 * i;
+        const int32_t added = static_cast<int32_t>(load(at)) - before[i];
+        store(at, before[i] + damage::scale_hit(added, percent));
+    }
+    // Native percentage is in tenths of one percent; update the same record
+    // the training HUD reads, rather than only changing the health loss.
+    if (const uint32_t shown = guest_call(ctx, base, sub_04E18548, {attacker}))
+        store(shown + 0xb4, uint64_t{load(shown + 0xb4)} * percent / 100);
+}
+
 PPC_FUNC(sub_03AE86A0_orig);
 PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const uint32_t player = ctx.r[3], id = load(ctx.r[4]);
@@ -3435,16 +3585,360 @@ PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     if ((id == kSummonProp || id == kDismissProp || id == kHoldProp) && ctx.r[5] == 0 &&
         slot_of_id(load(player + kPlayerSelectId)) >= 0)
         summon_property(player, id, load(ctx.r[4] + 4));
+    const bool trace_special = (std::getenv("TTT2_TRACE_AKUMA") || std::getenv("TTT2_TRACE_SPECIAL_CANCELS")) &&
+                               (id == 0x8093 || id == 0x80a5) && ctx.r[5] == 0;
+    const uint32_t trace_value = trace_special ? load(ctx.r[4] + 4) : 0;
+    const uint32_t trace_frame = trace_special ? load(player + kPlayerFrame) : 0;
+    const bool noctis_trace = trace_noctis_air(player) && (id == 0x8093 || id == 0x80a5);
+    const uint32_t requested = noctis_trace ? load(ctx.r[4]+4) : 0;
+    const uint32_t pass = ctx.r[5];
     sub_03AE86A0_orig(ctx, base);
+    if (noctis_trace)
+        std::fprintf(stderr,"noctis-air SET player=%08X frame=%u prop=%04X requested=%u stored=%u pass=%u\n",
+            player,load(player+kPlayerFrame),id,requested,load(player+(id==0x80a5?0x628:0x63c)),pass);
+    if (trace_special)
+        std::fprintf(stderr, "akuma-buffer SET player=%08X frame=%u requested=%u stored=%u\n",
+                     player, trace_frame, trace_value, load(player + (id == 0x80a5 ? 0x628 : 0x63c)));
+}
+
+PPC_FUNC(sub_0404FF30_orig);
+PPC_FUNC(sub_0404FF30) {
+    const uint32_t requirement = ctx.r[3], player = ctx.r[4];
+    const uint32_t kind = load(requirement);
+    const bool trace = (std::getenv("TTT2_TRACE_AKUMA") || std::getenv("TTT2_TRACE_SPECIAL_CANCELS")) &&
+        (kind == 307 || kind == 308 || ((kind == 46 || kind == 47) && load(player + 0x63c) != 0));
+    const uint32_t wanted = trace ? load(requirement + 4) : 0;
+    const uint32_t stored = trace ? load(player + (kind == 308 ? 0x628 : 0x63c)) : 0;
+    const uint32_t frame = trace ? load(player + kPlayerFrame) : 0;
+    const uint32_t move = trace ? load(player + kPlayerMove) : 0;
+    const bool noctis_trace = trace_noctis_air(player) &&
+        (kind == 307 || kind == 308 || kind == 46 || kind == 47 || kind == 457 || kind == 0x8093 || kind == 0x80a5);
+    const uint32_t noctis_wanted = noctis_trace ? load(requirement+4) : 0;
+    sub_0404FF30_orig(ctx, base);
+    if (noctis_trace)
+        std::fprintf(stderr,"noctis-air CHECK player=%08X frame=%u req=%u wanted=%u input_latch=%u hit_latch=%u result=%u\n",
+            player,load(player+kPlayerFrame),kind,noctis_wanted,load(player+0x63c),load(player+0x628),ctx.r[3]);
+    if (trace) {
+        static std::map<uint32_t, std::pair<uint32_t, uint32_t>> last;
+        const auto key = std::make_pair(move, frame);
+        if (wanted || kind != 307 || last[player] != key) {
+            std::fprintf(stderr, "akuma-buffer CHECK player=%08X move=%08X frame=%u req=%u wanted=%u stored=%u result=%u\n",
+                         player, move, frame, kind, wanted, stored, ctx.r[3]);
+            last[player] = key;
+        }
+    }
+}
+
+namespace {
+bool trace_eliza_assist(uint32_t player) {
+    if (!std::getenv("TTT2_TRACE_ELIZA_ASSIST") || !player) return false;
+    const int k = slot_of_id(load(player + kPlayerSelectId));
+    return k >= 0 && (g_added[k].code == "elz" || g_added[k].code == "kmi" || g_added[k].code == "mry" || g_added[k].code == "rei");
+}
+const char* assist_move_name(uint32_t player) {
+    const uint32_t move = load(player + kPlayerMove);
+    return move && load(move) ? reinterpret_cast<const char*>(guest_pointer(load(move))) : "?";
+}
+bool trace_glide_move(uint32_t player) {
+    const std::string_view name(assist_move_name(player));
+    return name == "Vp_rk00B" || name.starts_with("Vp_dash_") ||
+           name == "Kt_rk00F" || name == "Kt_shoryu02" ||
+           name == "Vp_6rklk" || name == "Vp_66lklk" ||
+           name == "Vp_66lklk_H" || name == "Vp_6rklkrk";
+}
+// Read the installed input window. The first Glide kick needs protection
+// only while it can select 3,3 or 3,4, not throughout its recovery.
+uint32_t assist_recovery(uint32_t player) {
+    const uint32_t move = load(player + kPlayerMove);
+    if (!move) return 0;
+    uint32_t row = load(move + 0x14);
+    if (!row) return 0;
+    uint32_t string_window_end = 0;
+    const bool first_kick = std::string_view(assist_move_name(player)) == "Vp_6rklk";
+    for (unsigned i = 0; i < 512; ++i, row += 32) {
+        if (load(row) == 0x8000)
+            return string_window_end ? string_window_end + 1 : load(row + 16);
+        const uint32_t button = load(row + 4);
+        if (first_kick && (button == 0x40000004 || button == 0x40000008 ||
+                           button == 4 || button == 8))
+            string_window_end = std::max(string_window_end, load(row + 20));
+    }
+    return 0;
+}
+// Read restored captures from the installed pack rather than maintaining
+// another list of character-specific special routes in the executable.
+eliza_assist::InputWindow special_assist_window(uint32_t player) {
+    eliza_assist::InputWindow result;
+    const int slot = player ? slot_of_id(load(player + kPlayerSelectId)) : -1;
+    const bool reina = slot >= 0 && g_added[slot].code == "rei";
+    const bool noctis = slot >= 0 && g_added[slot].code == "mrz";
+    const std::string_view name(assist_move_name(player));
+    const uint32_t move = load(player + kPlayerMove);
+    uint32_t row = move ? load(move + 0x14) : 0;
+    if (!row) return result;
+    for (unsigned i = 0; i < 512; ++i, row += 32) {
+        if (load(row) == 0x8000) break;
+        const uint32_t extra = load(row + 12);
+        const uint32_t mode = extra ? load(extra) : 0;
+        bool capture = false;
+        if (mode == 0x2800) {
+            uint32_t req = load(row + 8);
+            for (unsigned j = 0; req && j < 128; ++j, req += 8) {
+                const uint32_t kind = load(req);
+                if (kind == 690) break;
+                if (kind == 0x8093 && load(req + 4)) capture = true;
+            }
+        }
+        const uint32_t button = load(row + 4);
+        const bool attack_button = (button & 0xf) && !(button & ~0x4000000fu);
+        result.add(mode, attack_button ? button : 0, load(row + 20), capture);
+        if (noctis) result.bridge_last = std::max(result.bridge_last,
+            eliza_assist::noctis_contact_bridge(name, load(row), button, mode, load(row + 20)));
+        if (reina) result.last = std::max(result.last, eliza_assist::reina_stance_window(
+            name, load(row), button, mode, load(row + 20)));
+    }
+    return result;
+}
+std::map<uint32_t, uint32_t> g_special_assist_returns;
+bool special_assist_sequence(uint32_t player) {
+    static std::map<uint32_t, eliza_assist::Session> sequences;
+    if (!player) return false;
+    const int slot = slot_of_id(load(player + kPlayerSelectId));
+    const bool supported = slot >= 0 &&
+        eliza_assist::supported(g_added[slot].code);
+    if (!supported) {
+        sequences.erase(player);
+        return false;
+    }
+    auto& state = sequences[player];
+    const bool was_active = state.active;
+    const uint32_t previous_partner = state.partner;
+    const std::string_view name(assist_move_name(player));
+    // Preserve the player-confirmed Glide entry and first-kick boundaries.
+    const bool legacy = g_added[slot].code == "elz" &&
+        (eliza_assist::entry(name) || eliza_assist::continuation(name));
+    const auto window = legacy ? eliza_assist::InputWindow{} : special_assist_window(player);
+    const bool glide_finisher = name == "Vp_66lklk" || name == "Vp_66lklk_H" || name == "Vp_6rklkrk";
+    const bool own_move = !glide_finisher && eliza_assist::owns_move(g_added[slot].code, name);
+    const bool starts = legacy ? eliza_assist::entry(name) :
+        ((g_added[slot].code != "mrz" || own_move) && (window.buffered || (own_move && window.last)));
+    const uint32_t move = load(player + kPlayerMove);
+    const uint32_t bridge_end = g_added[slot].code == "mry" && move ?
+        eliza_assist::geese_contact_bridge(name, load(move + 0x68)) :
+        g_added[slot].code == "mrz" ? window.bridge_end() : 0;
+    const bool continues = legacy ? eliza_assist::continuation(name) : bridge_end != 0;
+    const bool active = state.update_window(true, load(player + 0x408) == 0,
+        load(player + 0x1e88) == 1, load(player + 0xac), load(player + kPlayerFrame),
+        legacy ? assist_recovery(player) : std::max(window.control_end(), bridge_end), starts, continues);
+    if (was_active && !active && load(player + 0x1e88) == 1 &&
+        load(player + 0x408) == 0 && previous_partner == load(player + 0xac))
+        g_special_assist_returns[player] = previous_partner;
+    if (!active) sequences.erase(player);
+    return active;
+}
+bool special_assist_pair(uint32_t player) {
+    return player && (special_assist_sequence(player) ||
+                     special_assist_sequence(load(player + 0xac)));
+}
+// Opt-in movement trace for comparing the imported rush with native SAV.
+void trace_assist_follow(uint32_t player) {
+    if (!player || !std::getenv("TTT2_TRACE_ASSIST_FOLLOW")) return;
+    const uint32_t partner = load(player + 0xac);
+    if (!partner || (!load(player + 0x1e88) && !load(partner + 0x1e88))) return;
+    const std::string_view name(assist_move_name(player));
+    const std::string_view partner_name(assist_move_name(partner));
+    const auto relevant = [](std::string_view n) { return n.starts_with("My_") || n.starts_with("Mt_") || n.starts_with("Vp_") || n.starts_with("Zbr_"); };
+    if (!relevant(name) && !relevant(partner_name)) return;
+    const uint32_t opponent = load(player + 0x98);
+    std::fprintf(stderr,
+        "assist-follow player=%08X name=%s frame=%u owner=%u assist=%u sideflag=%u pos=%.3f,%.3f input=%08X dir=%08X timer=%u stage=%u pending=%08X speed=%.3f/%.3f/%.3f/%.3f partner=%08X partner_name=%s partner_frame=%u partner_owner=%u partner_pos=%.3f,%.3f opponent=%08X opponent_pos=%.3f,%.3f\n",
+        player, assist_move_name(player), load(player + kPlayerFrame),
+        load(player + 0x1e80), load(player + 0x1e88), load(player + 0x1e8c),
+        loadf(player), loadf(player + 8), load(player + 0x7f0), load(player + 0x7f4),
+        load(player + 0x7c0), load(player + 0x7b8), load(player + 0x7c4),
+        loadf(player + 0x1e90), loadf(player + 0x1ea0), loadf(player + 0x1ea4), loadf(player + 0x1ea8),
+        partner, assist_move_name(partner), load(partner + kPlayerFrame), load(partner + 0x1e80),
+        loadf(partner), loadf(partner + 8), opponent,
+        opponent ? loadf(opponent) : 0.0f, opponent ? loadf(opponent + 8) : 0.0f);
+}
+void trace_eliza_move(uint32_t player) {
+    if (!trace_eliza_assist(player)) return;
+    static std::map<uint32_t, std::pair<uint32_t, bool>> last;
+    const uint32_t move = load(player + kPlayerMove);
+    auto& old = last[player];
+    const bool glide = trace_glide_move(player);
+    if (move != old.first && (glide || old.second))
+        std::fprintf(stderr, "eliza-assist MOVE player=%08X move=%08X name=%s frame=%u input=%08X lock=%u flags=%08X/%08X\n",
+                     player, move, assist_move_name(player), load(player + kPlayerFrame),
+                     load(player + 0x7f0), load(player + 0x800), load(player + 0x480), load(player + 0x484));
+    old = {move, glide};
+}
+} // namespace
+
+PPC_FUNC(sub_04E187B8_orig);
+// A deferred native return is a request, not a new timeout. Complete it at
+// selection boundary, before either fighter decodes another human input.
+// A committed finisher keeps animating on the native inactive assist route.
+void finish_special_assist(PPCContext& ctx, uint8_t* base, uint32_t player) {
+    if (!player) return;
+    const uint32_t pair[] = {player, load(player + 0xac)};
+    for (uint32_t assist : pair) {
+        if (!assist) continue;
+        special_assist_sequence(assist);
+        const auto it = g_special_assist_returns.find(assist);
+        if (it == g_special_assist_returns.end()) continue;
+        const uint32_t partner = it->second;
+        g_special_assist_returns.erase(it);
+        if (load(assist + 0xac) != partner || load(assist + 0x1e88) != 1 ||
+            !load(assist + 0x1e80)) continue;
+        store(assist + 0x7b8, 0);
+        store(assist + 0x7c0, UINT32_MAX);
+        store(assist + 0x7c4, 0);
+        guest_call(ctx, base, sub_04E187B8_orig, {assist, 1});
+    }
+}
+
+// Keep the main fighter on its native inactive/assist route while the
+// supported assist owns a special or string continuation. Filtering attack buttons alone left the main
+// fighter on human movement, rather than the native waiting/follow route.
+PPC_FUNC(sub_03F53238_orig);
+PPC_FUNC(sub_03F52F20_orig);
+PPC_FUNC(sub_03F52F20) {
+    const uint32_t player = ctx.r[3];
+    const bool owned_before = player && load(player + 0x1e80);
+    finish_special_assist(ctx, base, player);
+    const uint32_t partner = player ? load(player + 0xac) : 0;
+    if (special_assist_sequence(partner) ||
+        (owned_before && !load(player + 0x1e80)))
+        sub_03F53238_orig(ctx, base);
+    else
+        sub_03F52F20_orig(ctx, base);
+}
+void trace_assist_lifetime(const char* operation, uint32_t player, bool deferred) {
+    if (!std::getenv("TTT2_TRACE_ELIZA_ASSIST") || !player) return;
+    const uint32_t partner = load(player + 0xac);
+    if (!trace_eliza_assist(player) && !trace_eliza_assist(partner)) return;
+    std::fprintf(stderr, "eliza-assist LIFETIME op=%s deferred=%u player=%08X name=%s frame=%u owner=%u assist=%u partner=%08X partner_name=%s partner_owner=%u partner_assist=%u timer=%u\n",
+        operation, deferred, player, assist_move_name(player), load(player + kPlayerFrame),
+        load(player + 0x1e80), load(player + 0x1e88), partner,
+        partner ? assist_move_name(partner) : "?", partner ? load(partner + 0x1e80) : 0,
+        partner ? load(partner + 0x1e88) : 0, load(player + 0x7c0));
+}
+// Native assist expiry/ownership operations. Defer them while the actual
+// supported special/string input window is still open. Committing a
+// terminal move releases control without waiting for its recovery.
+// On recovery, interruption, tag-out or assist cancellation,
+// the original operations execute unchanged.
+PPC_FUNC(sub_04E185EC_orig);
+PPC_FUNC(sub_04E185EC) {
+    const bool deferred = special_assist_sequence(ctx.r[3]);
+    trace_assist_lifetime("handoff", ctx.r[3], deferred);
+    if (!deferred) sub_04E185EC_orig(ctx, base);
+}
+PPC_FUNC(sub_04E187B8_orig);
+PPC_FUNC(sub_04E187B8) {
+    const bool deferred = special_assist_sequence(ctx.r[3]);
+    trace_assist_lifetime("expiry", ctx.r[3], deferred);
+    if (deferred) {
+        // 0433B1D8 consumes the native countdown, then clears it to -1
+        // before calling us. Keep the return request alive for the next
+        // frame; otherwise neutral recovery has no expiry left to execute.
+        store(ctx.r[3] + 0x7c0, eliza_assist::kRetryExpiryNextFrame);
+    } else {
+        sub_04E187B8_orig(ctx, base);
+    }
+}
+PPC_FUNC(sub_04E19DE4_orig);
+PPC_FUNC(sub_04E19DE4) {
+    const bool deferred = ctx.r[4] == 0 && special_assist_pair(ctx.r[3]);
+    trace_assist_lifetime("end", ctx.r[3], deferred);
+    if (!deferred) sub_04E19DE4_orig(ctx, base);
+}
+PPC_FUNC(sub_03F53238_orig);
+PPC_FUNC(sub_03F53238) {
+    const uint32_t player = ctx.r[3];
+    const bool owned_before = player && load(player + 0x1e80);
+    finish_special_assist(ctx, base, player);
+    const bool trace = trace_eliza_assist(player) && trace_glide_move(player);
+    const uint32_t controller = ctx.r[4], raw = ctx.r[5], pressed = ctx.r[6];
+    // Decode human input while an installed special/string selection window
+    // is open; terminal moves retain the native inactive assist route.
+    const bool glide_input = special_assist_sequence(player);
+    if (glide_input || (!owned_before && player && load(player + 0x1e80)))
+        sub_03F52F20_orig(ctx, base);
+    else
+        sub_03F53238_orig(ctx, base);
+    if (trace)
+        std::fprintf(stderr, "eliza-assist ROUTE player=%08X name=%s frame=%u controller=%u raw=%08X pressed=%08X owner=%u assist=%u assist_side=%u control=%u return_timer=%u routed=%08X\n",
+                     player, assist_move_name(player), load(player + kPlayerFrame), controller, raw, pressed,
+                     load(player + 0x1e80), load(player + 0x1e88), load(player + 0x1f10),
+                     load(player + 0x408), load(player + 0x7c0), load(player + 0x7f0));
+}
+
+PPC_FUNC(sub_03F51E70_orig);
+PPC_FUNC(sub_03F51E70) {
+    const uint32_t player = ctx.r[3], row = ctx.r[4];
+    const bool trace = trace_eliza_assist(player) && trace_glide_move(player) && row && load(row + 4);
+    const bool noctis_trace = trace_noctis_air(player) && row && load(row+4);
+    sub_03F51E70_orig(ctx, base);
+    if (noctis_trace)
+        std::fprintf(stderr,"noctis-air INPUT player=%08X frame=%u buttons=%08X mode=%08X window=%u-%u start=%u held=%08X result=%u\n",
+            player,load(player+kPlayerFrame),load(row+4),load(load(row+12)),load(row+16),load(row+20),
+            load(row+24),load(player+0x7f0),ctx.r[3]);
+    if (trace)
+        std::fprintf(stderr, "eliza-assist INPUT player=%08X name=%s frame=%u row=%08X dir=%08X buttons=%08X mode=%08X target=%u window=%u-%u start=%u held=%08X dirheld=%08X dirpress=%08X lock=%u result=%u\n",
+                     player, assist_move_name(player), load(player + kPlayerFrame), row, load(row), load(row + 4),
+                     load(load(row + 12)), load16(row + 28), load(row + 16), load(row + 20), load(row + 24),
+                     load(player + 0x7f0), load(player + 0x7f4), load(player + 0x7f8), load(player + 0x800), ctx.r[3]);
+}
+
+PPC_FUNC(sub_0414E7E4_orig);
+PPC_FUNC(sub_0414E7E4) {
+    const uint32_t player = ctx.r[6];
+    const bool trace = trace_eliza_assist(player) && trace_glide_move(player);
+    const bool noctis_trace = trace_noctis_air(player);
+    sub_0414E7E4_orig(ctx, base);
+    if (noctis_trace && ctx.r[3]) {
+        const uint32_t row = ctx.r[3];
+        std::fprintf(stderr,"noctis-air SELECT player=%08X frame=%u buttons=%08X mode=%08X target=%u window=%u-%u start=%u\n",
+            player,load(player+kPlayerFrame),load(row+4),load(load(row+12)),load16(row+28),
+            load(row+16),load(row+20),load(row+24));
+    }
+    if (trace && ctx.r[3]) {
+        const uint32_t row = ctx.r[3];
+        std::fprintf(stderr, "eliza-assist SELECT player=%08X name=%s frame=%u row=%08X dir=%08X buttons=%08X mode=%08X target=%u held=%08X lock=%u\n",
+                     player, assist_move_name(player), load(player + kPlayerFrame), row, load(row), load(row + 4),
+                     load(load(row + 12)), load16(row + 28), load(player + 0x7f0), load(player + 0x800));
+    }
 }
 
 PPC_FUNC(sub_04336854_orig);
+namespace {
+void correct_noctis_assault_exit(uint32_t player) {
+    const int slot = player ? slot_of_id(load(player + kPlayerSelectId)) : -1;
+    if (slot < 0 || !noctis_assault::exit_move(g_added[slot].code, damage_move_name(player))) return;
+    const uint32_t partner = load(player + 0xac), opponent = load(player + 0x98);
+    if (!partner || !opponent || partner == opponent) return;
+    noctis_assault::Position position{loadf(player), loadf(player + 8)};
+    if (noctis_assault::keep_partner_side(position,
+            {loadf(partner),loadf(partner + 8)}, {loadf(opponent),loadf(opponent + 8)})) {
+        storef(player,position.x);
+        storef(player + 8,position.z);
+    }
+}
+} // namespace
+
 PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses into the objects at +164, +168)
     const uint32_t player = ctx.r[3];
+    finish_special_assist(ctx, base, player);
+    trace_eliza_move(player);
+    trace_noctis_air_step(player);
     const bool own = ctx.lr < 0x04336854 || ctx.lr >= 0x0433AF5C;
+    if (own) trace_assist_follow(player);
     const auto it = own ? g_arcs.find(player) : g_arcs.end();
     if (it == g_arcs.end() || it->second.mode == Arc2D::kNone) {
         sub_04336854_orig(ctx, base);
+        if (own) correct_noctis_assault_exit(player);
         return;
     }
     Arc2D& s = it->second;
@@ -3454,6 +3948,7 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
             storef(player + kPlayerVy, loadf(player + kPlayerVy) - (s.g - kTitleGravity) * slow_motion(player));
     }
     sub_04336854_orig(ctx, base);
+    if (own) correct_noctis_assault_exit(player);
     const uint32_t move = load(player + kPlayerMove);
     if (s.mode == Arc2D::kBaked) {
         if (move == s.move) {

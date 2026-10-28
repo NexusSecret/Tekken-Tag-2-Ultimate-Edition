@@ -112,10 +112,15 @@ struct PipelineKey {
 std::filesystem::path cache_directory() {
     static const std::filesystem::path dir = [] {
         std::filesystem::path d;
+#ifdef _WIN32
+        if (const char* x = std::getenv("LOCALAPPDATA"); x && *x) d = std::filesystem::path(x) / "TTT2Ultimate/cache";
+        else return std::filesystem::path();
+#else
         if (const char* x = std::getenv("XDG_CACHE_HOME"); x && *x) d = x;
         else if (const char* h = std::getenv("HOME")) d = std::filesystem::path(h) / ".cache";
         else return std::filesystem::path();
         d /= "ttt2";
+#endif
         std::error_code ec;
         std::filesystem::create_directories(d / "spirv", ec);
         return ec ? std::filesystem::path() : d;

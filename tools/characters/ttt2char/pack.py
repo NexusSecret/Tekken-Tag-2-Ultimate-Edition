@@ -50,16 +50,15 @@ import stat
 import subprocess
 import sys
 
-from . import InputError, signals
+from . import InputError, signals, paths
 from .characters import GAMES, game_of
 
 FILES = ('.xml', '.nud', '.nut', '.bon', '.moveset', '.motion')
 SHARED = 'shared'               # the packs' shared title entries
 PACK_FORMAT = 1                 # character.ini `format` of the packs made now (the port's kPackFormat, roster.cpp)
-REVISION = 4                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
-                                # 2: tag combos; Reina's throws, bounds and icon; 3: the definitions' bounds alone,
-                                # Tekken 7's after the Bound Mod: screws, tornados and slams no longer bound; 4: the
-                                # face joints at the fighter's own, its eyelids turned as Tekken 7 turns them)
+REVISION = 5                    # what packs made before lack, for every fighter (1: cloth, outfits, move fixes;
+                                # 2: tag combos; Reina's throws, bounds and icon; 3: face animations and eyelids;
+                                # 5: main sync preserving this branch's custom bound policy (upstream uses 4))
 # Added fighter k's place as the port gives it (roster.cpp): select id 64 + k, a motion row (what the moveset's
 # fighter fields hold: the rows no fighter has first, then 69 on) and a select grid cell (roster.cpp kCells): the free
 # ends of the top row, then columns beyond the grid's ends (-1 and 23, then -2 and 24). A cell is
@@ -90,8 +89,7 @@ def place(k):
 def default_folder():
     if os.environ.get('TTT2_CHARACTERS'):
         return os.environ['TTT2_CHARACTERS']
-    data = os.environ.get('XDG_DATA_HOME') or os.path.join(os.path.expanduser('~'), '.local', 'share')
-    return os.path.join(data, 'ttt2', 'characters')
+    return os.path.join(paths.data_root(), 'characters')
 
 
 def output_folder(folder):
@@ -99,8 +97,11 @@ def output_folder(folder):
     folder = os.path.abspath(os.path.expanduser(folder or default_folder()))
     real = os.path.realpath(folder)       # through symbolic links, which could lead into the repository
     # (installed, in <prefix>/share/ttt2/characters as in the AppImage, the importer is in no repository)
-    if os.path.exists(os.path.join(REPOSITORY, '.git')) and os.path.commonpath([real, REPOSITORY]) == REPOSITORY \
-            and not git_ignores(real):
+    try:
+        inside = os.path.normcase(os.path.commonpath([real, REPOSITORY])) == os.path.normcase(REPOSITORY)
+    except ValueError:
+        inside = False
+    if os.path.exists(os.path.join(REPOSITORY, '.git')) and inside and not git_ignores(real):
         raise InputError('the pack would go into the repository (%s): packs hold Namco\'s assets and must stay out '
                          'of it; leave out --out (the default is %s)' % (folder, default_folder()))
     return folder
@@ -109,6 +110,19 @@ def output_folder(folder):
 def git_ignores(folder):
     """Whether git ignores `folder` itself (as it does local/) in the repository (False when git cannot tell): a
     name no ignore pattern covers, in that folder."""
+    # The portable Windows launcher need not have the development app's Git
+    # on PATH. Recognize only the explicit private /local/ cache exclusion.
+    local = os.path.abspath(os.path.join(REPOSITORY, 'local'))
+    try:
+        canonical_local = os.path.realpath(local)
+        inside_local = os.path.normcase(os.path.commonpath([os.path.realpath(folder), canonical_local])) == os.path.normcase(canonical_local)
+        plain_local = os.path.normcase(canonical_local) == os.path.normcase(local)
+        with open(os.path.join(REPOSITORY, '.gitignore'), encoding='utf-8') as rules:
+            patterns = [line.strip() for line in rules]
+        if inside_local and plain_local and '/local/' in patterns and not any(p.startswith('!') for p in patterns):
+            return True
+    except (OSError, ValueError):
+        pass
     try:
         probe = os.path.join(folder, 'ttt2-pack-probe')
         return subprocess.run(['git', '-C', REPOSITORY, 'check-ignore', '-q', probe],

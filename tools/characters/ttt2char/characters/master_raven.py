@@ -75,10 +75,8 @@ VOICE_PREFIX = 'fr'
 # the id maps: Heihachi in both games, and her generic moves against TTT2's (Heihachi, the donor, Asuka)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 MOVESET = {
+    'bounds': {'Nj_lprp00F': True},
     'name': '[MASTER RAVEN]',
-    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
-    'bounds': dict.fromkeys(('Nj_4rprklrk', 'Nj_R_rplk00', 'Nj_commet01', 'Nj_comrollk', 'Nj_hizi00', 'Nj_katahizi',
-                             'Nj_lprp00F'), True),
     'drop_moves': r'^Fr_Direct$',
     'direct': [(r'^(ju|mk)_s', 'anim', ['fr_s%02d' % k for k in range(4)]),     # the donor's intros -> her
                (r'^ju_w', 'anim', ['fr_w%02d' % k for k in range(3)])],         # win poses
