@@ -120,12 +120,36 @@ def built_by(settings):
     return file.read_text(encoding='utf-8').strip() if file.is_file() else ''
 
 
+def installed_by(settings):
+    """The launcher version whose files built the installed game ('' when unknown)."""
+    file = settings.build / 'ttt2-installed-version.txt'
+    return file.read_text(encoding='utf-8').strip() if file.is_file() and settings.installed() else ''
+
+
+def importer(settings, *args, timeout=None):
+    """The character importer's answer for the launcher (tools/characters/launcher.py), as for the
+    Linux launcher: status (what is there) or owned (which DLC Steam says is owned)."""
+    command = [sys.executable, '-u', str(settings.root / 'tools/characters/launcher.py'), *args]
+    if args[0] == 'status' and settings.installed(): command += ['--game', str(settings.installed())]
+    result = subprocess.run(command, cwd=settings.root, env=settings.environment(), capture_output=True, text=True,
+                            encoding='utf-8', errors='replace', timeout=timeout,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        lines = [line for line in result.stderr.splitlines() if line.strip()]
+        raise RuntimeError(lines[-1] if lines else 'the importer ended with code %d' % result.returncode)
+
+
 def worker(settings, action, names, cancelled=lambda: False):
     os.environ.update(settings.environment())
     sys.path[:0] = [str(settings.root / 'local/windows-python'), str(settings.root / 'tools/characters'), str(Path(settings.values['tools']) / 'python')]
     if action == 'setup':
         from setup_game import setup
         setup(settings, run_command)
+    elif action == 'upgrade':
+        from setup_game import upgrade
+        upgrade(settings, run_command)
     elif action == 'build':
         tools = Path(settings.values['tools'])
         if not (tools / 'python/cmake/data/bin/cmake.exe').is_file():
@@ -158,21 +182,8 @@ def worker(settings, action, names, cancelled=lambda: False):
         sys.argv = command[2:]
         runpy.run_path(command[2], run_name='__main__')
     else: raise ValueError('Unknown task: ' + action)
-    if action in ('setup', 'build'):
-        import self_update
+    import self_update
+    if action in ('setup', 'build', 'upgrade'):
         (settings.build / 'ttt2-launcher-version.txt').write_text(self_update.version() + '\n', encoding='utf-8')
-
-
-def fighters(settings):
-    sys.path.insert(0, str(settings.root / 'tools/characters'))
-    from ttt2char.characters import CHARACTERS, definition, game_of
-    from ttt2char import pack
-    loaded = {p['code']: p for _, p in pack.loaded(pack.installed(settings.values['packs']))}
-    rows = []
-    for name in CHARACTERS:
-        d = definition(name); found = loaded.get(d.CODE); state = 'Not added'
-        if found:
-            state = 'Update available' if found['revision'] < pack.revision(d) else 'Added'
-            if found.get('stand_in'): state = 'Stand-in moves: reimport'
-        rows.append((name, d.NAME, 'Tekken 8' if game_of(d) == 'tekken8' else 'Tekken 7', state))
-    return rows
+    if action in ('setup', 'install', 'update', 'upgrade') and built_by(settings):
+        (settings.build / 'ttt2-installed-version.txt').write_text(built_by(settings) + '\n', encoding='utf-8')

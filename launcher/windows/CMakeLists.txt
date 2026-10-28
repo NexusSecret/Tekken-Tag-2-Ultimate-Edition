@@ -14,6 +14,7 @@ set_target_properties(ttt2-launcher PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 
 add_test(NAME windows_first_run_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_setup.py)
 add_test(NAME windows_launcher_update_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_self_update.py)
+add_test(NAME windows_launcher_keys_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_keys.py)
 # The release .exe made of this build's launcher: it says its version and
 # unpacks its files (as entry.cpp reads them).
 add_test(NAME windows_launcher_exe_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_launcher_exe.py

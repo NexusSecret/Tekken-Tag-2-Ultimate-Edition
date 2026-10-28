@@ -33,6 +33,7 @@ jobs:
       - run: python launcher/windows/test_backend.py
       - run: python launcher/windows/test_setup.py
       - run: python launcher/windows/test_self_update.py
+      - run: python launcher/windows/test_keys.py
       - name: Windows release launcher
         run: python launcher/windows/make_launcher_exe.py build-linux/Ultimate_Launcher-x86_64.exe
   windows:

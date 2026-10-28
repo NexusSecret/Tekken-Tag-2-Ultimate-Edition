@@ -191,11 +191,17 @@ paths are unchanged. The ZIP startup path obtains private Python/Tk automaticall
 can also use an installed Python 3 with Tcl/Tk. Setup obtains numpy and Pillow. Set `TTT2_PYTHON`
 to a Python executable to override automatic discovery.
 
-The Windows interface provides Play, Build/Rebuild, Install, Update installed game,
-individual fighter import/update/removal (including Reina), selectable game/data/
-pack/save/tool paths, display settings, a keyboard.ini editor, import cancellation,
-and persistent task/game logs. It calls the existing Windows build scripts,
-native installer, and shared character importer. Set Up Game prepares the build tools automatically from the extracted project.
+The Windows interface looks and behaves as the Linux launcher: one page with the
+game (Play, Settings, Update when the launcher's version is newer than the game's)
+and its characters as the shared importer finds them (Tekken 7, Tekken 8 and Steam;
+Add, Update and Remove per fighter, Add All, the DLC with what Steam says you own),
+a Settings page (fullscreen, resolution, 120 fps, input delay, and the keyboard's
+keys chosen by pressing them, as the Linux launcher writes keyboard.ini), and the
+task panel below with its progress, Cancel and Details. Windows' own parts stay:
+Set Up Game, the More menu (Build / Rebuild, Install from Wii U Source, Update
+Installed Game, the logs) and the Folders in Settings. It calls the existing Windows
+build scripts, native installer, and shared character importer, and needs nothing
+beyond the Python with Tk it gets itself. Set Up Game prepares the build tools automatically from the extracted project.
 Keep the project folder for rebuilds. The compiled launcher executable can also
 be opened from its build folder after setup.
 

@@ -73,6 +73,11 @@ class LauncherBackend(unittest.TestCase):
         folder.mkdir();(folder/'.ttt2-install').touch()
         self.assertEqual(self.settings.installer_command(True),[str(exe),'--update',str(folder)])
 
+    def test_game_update_needs_an_installed_game(self):
+        from backend import worker, installed_by
+        with self.assertRaisesRegex(ValueError, 'Set up the game first'):
+            worker(self.settings, 'upgrade', [])
+        self.assertEqual(installed_by(self.settings), '')
     def test_only_release_exe_updates_itself(self):
         from backend import worker
         with mock.patch.dict(os.environ, {'TTT2_LAUNCHER_EXE': ''}), self.assertRaisesRegex(ValueError, 'release .exe'):
