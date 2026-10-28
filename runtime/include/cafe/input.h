@@ -40,4 +40,13 @@ void set_gamepad_state(const GamepadState& state);
 void arm_select_chord(bool partner_held);
 bool take_select_chord();
 
+// Stepped input, for a game that runs its frame every `every` reads of the
+// pad only (title/practice.cpp: Practice's slow motion): the game sees the
+// pad change on every `every`-th read, with whatever was pressed since
+// (a press made and let go in between counts as held for that read); the
+// reads in between show it as it was. 1: every read, as usual.
+// input_step_delivered() says whether the last read was one that changed.
+void set_input_step(uint32_t every);
+bool input_step_delivered();
+
 } // namespace cafe::os
