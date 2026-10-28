@@ -61,9 +61,12 @@ REVISION = 5                    # what packs made before lack, for every fighter
                                 # 5: main sync preserving this branch's custom bound policy (upstream uses 4))
 # Added fighter k's place as the port gives it (roster.cpp): select id 64 + k, a motion row (what the moveset's
 # fighter fields hold: the rows no fighter has first, then 69 on) and a select grid cell (roster.cpp kCells): the free
-# ends of the top row, then columns beyond the grid's ends (-1 and 23, then -2 and 24). A cell is
-# (column, grid row, anchor, columns from it): its picture goes where the grid panel of fighter `anchor` (in grid
-# row 1, or the cell's own row) is, that many columns over, in the cell's row (row 0: at the top row's height).
+# ends of the top row, then columns beyond the grid's ends (-1 and 23, then -2 and 24), then (ROW_CELLS) a new top row
+# over the title's three, from the '?' column outwards: the grid has it only while a fighter's place is past CELLS
+# (needs_new_row; art.four_rows moves the grid down for it, shared/grid.ini tells the port). A cell is (column, grid
+# row, anchor, columns from it): its picture goes where the grid panel of fighter `anchor` (in grid row 1, or the
+# cell's own row) is, that many columns over, in the cell's row (row 0: at the top row's height; above it: rows'
+# pitches higher).
 FIRST_ID = 64
 DIRECT_ROWS = (58, 64, 61, 62, 65)
 FIRST_VIRTUAL_ROW = 69
@@ -73,6 +76,16 @@ CELLS = ((19, 0, 'edd', 0), (2, 0, 'bru', 0), (20, 0, 'lee', 0), (1, 0, 'rav', 0
          (-1, 2, 'mok', -1),
          (24, 1, 'kum', 2), (-2, 1, 'rog', -2), (24, 2, 'pan', 2), (-2, 2, 'mok', -2), (24, 0, 'kum', 2),
          (-2, 0, 'rog', -2))
+# right of the '?' column, then left, outwards (columns 0-10 from Roger's panel, 12-24 from Kuma's)
+ROW_CELLS = tuple(cell for right, left in zip(range(12, 25), range(10, -3, -1))
+                  for cell in ((right, -1, 'kum', right - 22), (left, -1, 'rog', left)))
+
+
+def needs_new_row(slots):
+    """Whether the select grid needs its new top row for fighters in these places."""
+    return any(k >= len(CELLS) for k in slots)
+
+
 MAX_FIGHTERS = 128              # (the port's kMaxFighters: places 0 to 127)
 CODE = re.compile(r'[a-z]{3}')  # a pack's code, as the port takes it
 REPOSITORY = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
@@ -82,7 +95,8 @@ def place(k):
     """dict(id, row, column, grid_row, anchor, columns) of added fighter k (the cell's fields None when the grid is
     full)."""
     row = DIRECT_ROWS[k] if k < len(DIRECT_ROWS) else FIRST_VIRTUAL_ROW + k - len(DIRECT_ROWS)
-    column, grid_row, anchor, columns = CELLS[k] if k < len(CELLS) else (None, None, None, None)
+    every = CELLS + ROW_CELLS
+    column, grid_row, anchor, columns = every[k] if k < len(every) else (None, None, None, None)
     return dict(id=FIRST_ID + k, row=row, column=column, grid_row=grid_row, anchor=anchor, columns=columns)
 
 
