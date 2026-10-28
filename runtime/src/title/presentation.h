@@ -12,9 +12,17 @@
 //   lettering of its "Wii U Edition"; the copyright line loses the words.
 // Everything is made from the Wii U game's own files.
 
+#include <cstdint>
+#include <optional>
+#include <vector>
+
 namespace cafe::title {
 
 // After vfs::open_game and the image load, before the title runs.
 void prepare_presentation();
+
+// An entry of the title's archives ("content/hdd/data003", the entry's name
+// hash), unpacked, as the game has it.
+std::optional<std::vector<uint8_t>> game_file(const char* archive, uint32_t hash);
 
 } // namespace cafe::title

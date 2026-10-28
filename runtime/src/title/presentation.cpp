@@ -489,6 +489,8 @@ void system_info_created(uint32_t info) {
     apply_confirm_button();
 }
 
+std::optional<std::vector<uint8_t>> game_file(const char* archive, uint32_t hash) { return game_entry(archive, hash); }
+
 void prepare_presentation() {
     const auto begin = std::chrono::steady_clock::now();
     // Texts name buttons by code points only the changed fonts show as icons.

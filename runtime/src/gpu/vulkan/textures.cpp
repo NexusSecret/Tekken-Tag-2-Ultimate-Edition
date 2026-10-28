@@ -562,7 +562,7 @@ void Renderer::invalidate(uint32_t address, uint32_t size, uint32_t coherency_fl
 }
 
 void Renderer::cpu_wrote(uint32_t address, uint32_t size) {
-    if (frames_per_frame_ > 1) forget_snapshots(address, size);
+    if (logging_) forget_snapshots(address, size);
     const uint64_t end = uint64_t{address} + size;
     static const uint32_t watch = [] {
         const char* w = std::getenv("TTT2_WATCH");
