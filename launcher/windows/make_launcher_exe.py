@@ -5,8 +5,9 @@
 
 OUTPUT is the .exe to write (Ultimate_Launcher-x86_64.exe for a release). It is
 launcher/windows/entry.cpp compiled for 64-bit Windows, with this project's
-files appended: Git's tracked files as they are in the working tree, batch
-files with Windows line ends. Nothing of the game is in it: the game is built
+files in it: Git's tracked files as they are in the working tree, batch files
+with Windows line ends, as resource 100 (RCDATA; appended after the program
+for a --stub, which is built already). Nothing of the game is in it: the game is built
 on the player's PC from their own .wua. On the player's PC the .exe keeps the
 files in %LOCALAPPDATA%\\TTT2Ultimate\\launcher, opens the launcher from there,
 and that launcher updates the .exe from this repository's releases
@@ -14,8 +15,8 @@ and that launcher updates the .exe from this repository's releases
 
 --stub EXE      entry.cpp as CMake built it for Windows (build-windows-*/ttt2-launcher.exe)
 --cxx COMPILER  else it is compiled here: with x86_64-w64-mingw32-g++ by default,
-                with the launcher's icon and version details when windres and
-                rsvg-convert are there too
+                and its windres, which puts the files in it (with its icon and
+                version details when rsvg-convert is there too)
 --allow-dirty   pack the working tree as it is, with uncommitted changes and new
                 files Git does not ignore (tests: a release is made from a commit)
 
@@ -76,7 +77,7 @@ def tracked(allow_dirty):
 
 
 def payload(files):
-    """entry.cpp's appended part: each file's path and bytes, then its trailer."""
+    """entry.cpp's files as it reads them: each file's path and bytes, then their trailer."""
     out = bytearray()
     for path in sorted(files):
         name = path.encode('utf-8')
@@ -94,20 +95,30 @@ def ico(pngs):
     return head + entries + data
 
 
-def resource(cxx, windres, number, work):
-    """The icon, version details and manifest as an object file; None
-    (with why) when the tools for it are missing."""
+# The resource that holds the files (entry.cpp's kFilesResource): an ordinary
+# part of a program, which virus scanners' guesses take less for a dropper's
+# payload than data appended after it.
+FILES_RESOURCE = 100
+
+
+def resource(cxx, windres, number, work, files):
+    """The files (resource FILES_RESOURCE), the manifest, version details and,
+    when rsvg-convert is there, the icon, as an object file to link."""
     rsvg = shutil.which('rsvg-convert')
     windres = windres or shutil.which(cxx.rsplit('-', 1)[0] + '-windres') or shutil.which('windres') or shutil.which('llvm-windres')
-    if not rsvg or not windres:
-        print('make_launcher_exe.py: no icon or version details: needs rsvg-convert and windres', file=sys.stderr)
-        return None
-    pngs = {}
-    for size in ICON_SIZES:
-        png = work / ('icon-%d.png' % size)
-        subprocess.run([rsvg, '-w', str(size), '-h', str(size), '-o', str(png), str(ICON)], check=True)
-        pngs[size] = png.read_bytes()
-    (work / 'launcher.ico').write_bytes(ico(pngs))
+    if not windres: die('windres is not installed (MinGW-w64\'s binutils): it puts the files in the .exe')
+    (work / 'files.bin').write_bytes(files)
+    icon = ''
+    if rsvg:
+        pngs = {}
+        for size in ICON_SIZES:
+            png = work / ('icon-%d.png' % size)
+            subprocess.run([rsvg, '-w', str(size), '-h', str(size), '-o', str(png), str(ICON)], check=True)
+            pngs[size] = png.read_bytes()
+        (work / 'launcher.ico').write_bytes(ico(pngs))
+        icon = '1 ICON "launcher.ico"\n'
+    else:
+        print('make_launcher_exe.py: no icon: needs rsvg-convert', file=sys.stderr)
     (work / 'launcher.manifest').write_text('''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges>
@@ -119,7 +130,7 @@ def resource(cxx, windres, number, work):
 </assembly>
 ''', encoding='utf-8')
     numbers = ','.join((number.split('.') + ['0'] * 4)[:4])
-    (work / 'launcher.rc').write_text('''1 ICON "launcher.ico"
+    (work / 'launcher.rc').write_text(icon + '''%(files)d RCDATA "files.bin"
 1 24 "launcher.manifest"
 1 VERSIONINFO
 FILEVERSION %(numbers)s
@@ -144,19 +155,20 @@ BEGIN
     VALUE "Translation", 0x409, 1200
   END
 END
-''' % dict(numbers=numbers, version=number), encoding='utf-8')
+''' % dict(numbers=numbers, version=number, files=FILES_RESOURCE), encoding='utf-8')
     subprocess.run([windres, '-O', 'coff', '-i', 'launcher.rc', '-o', 'launcher.res.o'], cwd=work, check=True)
     return work / 'launcher.res.o'
 
 
-def compile_stub(cxx, windres, number, work):
+def compile_launcher(cxx, windres, number, work, files):
+    """entry.cpp compiled with the files in it."""
     if not shutil.which(cxx): die(cxx + ' is not installed (MinGW-w64, or pass --cxx or --stub)')
-    objects = [str(o) for o in [resource(cxx, windres, number, work)] if o]
-    out = work / 'stub.exe'
+    out = work / 'launcher.exe'
     subprocess.run([cxx, '-std=c++20', '-O2', '-municode', '-mwindows', '-static', '-s',
-                    '-DTTT2_LAUNCHER_VERSION="%s"' % number, str(HERE / 'entry.cpp'), *objects,
+                    '-DTTT2_LAUNCHER_VERSION="%s"' % number, str(HERE / 'entry.cpp'),
+                    str(resource(cxx, windres, number, work, files)),
                     '-o', str(out), '-ladvapi32', '-lbcrypt', '-lshell32'], check=True)
-    return out
+    return out.read_bytes()
 
 
 def main():
@@ -177,12 +189,16 @@ def main():
     for needed in ('launcher/windows/main.py', 'Start Ultimate Launcher.cmd', 'launcher/builder/CMakeLists.txt'):
         if needed not in files: die('the project lacks ' + needed)
     with tempfile.TemporaryDirectory(prefix='ttt2-launcher-exe-') as temporary:
-        stub = args.stub or compile_stub(args.cxx, args.windres, number, Path(temporary))
-        program = Path(stub).read_bytes()
-        if program[:2] != b'MZ': die('%s is not a Windows program' % stub)
-        if program[-TRAILER.size:][-len(MAGIC):] == MAGIC: die('%s already holds files: give the launcher as built' % stub)
+        if args.stub:
+            program = args.stub.read_bytes()
+            if program[:2] != b'MZ': die('%s is not a Windows program' % args.stub)
+            if program[-TRAILER.size:][-len(MAGIC):] == MAGIC:
+                die('%s already holds files: give the launcher as built' % args.stub)
+            program += payload(files)
+        else:
+            program = compile_launcher(args.cxx, args.windres, number, Path(temporary), payload(files))
         part = output.with_name(output.name + '.part')
-        part.write_bytes(program + payload(files))
+        part.write_bytes(program)
     if not is_launcher_exe(part):
         part.unlink(); die('the .exe made is not a 64-bit Windows launcher')
     os.replace(part, output)

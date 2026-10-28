@@ -2,7 +2,7 @@
 (launcher/core/release.cpp, launcher/app/self_update.cpp).
 
 The release's Ultimate_Launcher-x86_64.exe (entry.cpp with the project's
-files appended, make_launcher_exe.py) opens this launcher with
+files in it, make_launcher_exe.py) opens this launcher with
 TTT2_LAUNCHER_EXE naming it. Only then is GitHub asked for this repository's
 newest release; when that one is newer, Update downloads its .exe beside the
 one that was started, checks it (its size, the SHA-256 GitHub gives, that it
@@ -33,7 +33,7 @@ LATEST = 'https://api.github.com/repos/Petexy/Tekken-Tag-2-Ultimate-Edition/rele
 EXE_VARIABLE = 'TTT2_LAUNCHER_EXE'
 # The pid of the launcher an update replaces: the new .exe waits for it to end.
 REPLACES_VARIABLE = 'TTT2_LAUNCHER_AFTER'
-# entry.cpp's trailer after the appended files: their size, count, SHA-256, magic.
+# entry.cpp's trailer after its files: their size, count, SHA-256, magic.
 TRAILER = struct.Struct('<QQ32s8s')
 MAGIC = b'TTT2PAY1'
 # How long the new .exe may take to say its version.
@@ -231,22 +231,21 @@ def cannot_replace(exe):
 
 
 def is_launcher_exe(file):
-    """Whether `file` is a 64-bit Windows program with a launcher's files
-    appended (entry.cpp's trailer)."""
+    """Whether `file` is a 64-bit Windows program holding a launcher's files: entry.cpp's trailer after them (in
+    its resource, or appended), with the SHA-256 of those files. (The word alone is in the launcher's code too.)"""
     try:
-        with open(file, 'rb') as stream:
-            head = stream.read(64)
-            if len(head) < 64 or head[:2] != b'MZ': return False
-            stream.seek(struct.unpack_from('<I', head, 0x3C)[0])
-            if stream.read(6) != b'PE\0\0\x64\x86': return False
-            stream.seek(0, os.SEEK_END)
-            end = stream.tell()
-            if end < TRAILER.size: return False
-            stream.seek(end - TRAILER.size)
-            size, _, _, magic = TRAILER.unpack(stream.read(TRAILER.size))
-            return magic == MAGIC and size <= end - TRAILER.size
+        data = Path(file).read_bytes()
     except OSError:
         return False
+    if len(data) < 64 or data[:2] != b'MZ': return False
+    pe = struct.unpack_from('<I', data, 0x3C)[0]
+    if data[pe:pe + 6] != b'PE\0\0\x64\x86': return False
+    at = len(data)
+    while (at := data.rfind(MAGIC, 0, at)) >= TRAILER.size - len(MAGIC):
+        start = at + len(MAGIC) - TRAILER.size
+        size, _, digest, _ = TRAILER.unpack_from(data, start)
+        if size <= start and hashlib.sha256(data[start - size:start]).digest() == digest: return True
+    return False
 
 
 def version_in(output):

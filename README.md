@@ -308,11 +308,16 @@ python3 launcher/windows/make_launcher_exe.py Ultimate_Launcher-x86_64.exe
 ```
 
 It is `launcher/windows/entry.cpp` compiled with MinGW-w64
-(`x86_64-w64-mingw32-g++`; `--cxx` names another, `--stub` takes a launcher
-CMake built for Windows), with the icon and version details when
-`rsvg-convert` and `windres` are there, and the project's tracked files
-appended (nothing of the game). Attach it to the release as it is named
-here: each launcher takes its own file from a release (`.AppImage`, `.exe`).
+(`x86_64-w64-mingw32-g++` and its `windres`; `--cxx` names another), with the
+project's tracked files (nothing of the game) as a resource of the program, and
+its icon and version details (the icon needs `rsvg-convert`). `--stub` takes a
+launcher CMake built for Windows instead and appends the files to it (tests).
+The files are a resource rather than data after the program because virus
+scanners' guesses take that for a dropper's payload less often; the `.exe` is
+not code-signed, so Windows Defender may still flag a new build by guess
+(`…!ml`): report it to Microsoft as a false positive. Attach it to the release
+as it is named here: each launcher takes its own file from a release
+(`.AppImage`, `.exe`).
 
 ## Playing
 

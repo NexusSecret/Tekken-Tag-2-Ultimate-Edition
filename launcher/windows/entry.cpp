@@ -3,7 +3,7 @@
 //
 // As CMake builds it, it opens the launcher of the project it was built in.
 // The release's Ultimate_Launcher-x86_64.exe is this program with the
-// project's files appended (make_launcher_exe.py): it keeps them in
+// project's files in it (make_launcher_exe.py): it keeps them in
 // %LOCALAPPDATA%\TTT2Ultimate\launcher, unpacked again whenever they differ
 // from the last ones, and opens the launcher from there, which can replace
 // this .exe with a newer release (self_update.py).
@@ -28,10 +28,11 @@ namespace fs = std::filesystem;
 #error "TTT2_LAUNCHER_VERSION must name the launcher's version (launcher/builder/CMakeLists.txt)"
 #endif
 
-// The appended files: for each, its path (UTF-8, '/' between folders) after
-// its length (4 bytes), its size (8 bytes) and its bytes; then this trailer.
-// All numbers little-endian. make_launcher_exe.py writes it, self_update.py
-// checks that a download has one.
+// The files: for each, its path (UTF-8, '/' between folders) after its
+// length (4 bytes), its size (8 bytes) and its bytes; then this trailer. All
+// numbers little-endian. make_launcher_exe.py writes it as resource
+// kFilesResource (or appends it to a launcher built already, for tests);
+// self_update.py checks that a download has it.
 struct Trailer {
     uint64_t size, count;     // of the files' part, and how many files
     unsigned char sha256[32]; // of the files' part
@@ -39,6 +40,7 @@ struct Trailer {
 };
 static_assert(sizeof(Trailer)==56);
 constexpr char kMagic[8]={'T','T','T','2','P','A','Y','1'};
+constexpr int kFilesResource=100; // (RCDATA)
 
 std::wstring quote(const std::wstring& s) {
     std::wstring out=L"\""; size_t slashes=0;
@@ -95,7 +97,7 @@ fs::path python(const fs::path& folder) {
     throw std::runtime_error("Install Python 3 with Tcl/Tk from python.org, or set TTT2_PYTHON to its python.exe.");
 }
 
-// ---- The release .exe: its appended files.
+// ---- The release .exe: its files.
 
 std::string read_file(const fs::path& path) {
     HANDLE file=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
@@ -143,10 +145,15 @@ std::string hex(std::string_view bytes) {
 }
 
 struct Payload { std::string files; Trailer trailer{}; };
-// The files appended to `exe`, checked; none when nothing is appended (a
-// CMake build).
+// The files in this program (its resource, else appended to `exe`), checked;
+// none when it has none (a CMake build).
 Payload payload(const fs::path& exe) {
-    Payload p; std::string all=read_file(exe);
+    Payload p; std::string all;
+    if(HRSRC found=FindResourceW(nullptr,MAKEINTRESOURCEW(kFilesResource),MAKEINTRESOURCEW(10))) {
+        HGLOBAL loaded=LoadResource(nullptr,found); const DWORD n=SizeofResource(nullptr,found);
+        if(const void* data=loaded ? LockResource(loaded) : nullptr; data && n) all.assign(static_cast<const char*>(data),n);
+    }
+    if(all.empty()) all=read_file(exe);
     if(all.size()<sizeof(Trailer)) throw std::runtime_error("Cannot read Ultimate Launcher's own file.");
     std::memcpy(&p.trailer,all.data()+all.size()-sizeof(Trailer),sizeof(Trailer));
     if(std::memcmp(p.trailer.magic,kMagic,sizeof kMagic)) return {};

@@ -14,12 +14,14 @@ import unittest
 import self_update
 from self_update import Cancelled, UpdateError, compare_versions, parse_release, version_in
 
-def fake_exe(body=b'', files=True):
-    """A 64-bit Windows program's header, then `body`, then a trailer when `files`."""
+def fake_exe(body=b'', files=True, after=b''):
+    """A 64-bit Windows program's header, then `body`, then files with their trailer when `files`, then `after`
+    (files in a resource: more of the program follows)."""
     head = bytearray(0x80); head[:2] = b'MZ'; struct.pack_into('<I', head, 0x3C, 0x40)
     head[0x40:0x46] = b'PE\0\0\x64\x86'
-    part = bytes(head) + body
-    return part + (self_update.TRAILER.pack(0, 0, bytes(32), self_update.MAGIC) if files else b'')
+    stored = b'some files'
+    trailer = self_update.TRAILER.pack(len(stored), 1, hashlib.sha256(stored).digest(), self_update.MAGIC)
+    return bytes(head) + body + (stored + trailer if files else b'') + after
 
 class Release(unittest.TestCase):
     def test_versions(self):
@@ -54,6 +56,11 @@ class Release(unittest.TestCase):
             exe = Path(folder) / 'a.exe'
             exe.write_bytes(fake_exe(b'program')); self.assertTrue(self_update.is_launcher_exe(exe))
             exe.write_bytes(fake_exe(b'program', files=False)); self.assertFalse(self_update.is_launcher_exe(exe))
+            exe.write_bytes(fake_exe(b'program', after=b'resources after them')); self.assertTrue(self_update.is_launcher_exe(exe))
+            # (The word in the launcher's code, or files whose SHA-256 is not the trailer's: no launcher.)
+            exe.write_bytes(fake_exe(self_update.MAGIC + b'code', files=False)); self.assertFalse(self_update.is_launcher_exe(exe))
+            exe.write_bytes(fake_exe(b'program').replace(b'some files', b'sOme files'))
+            self.assertFalse(self_update.is_launcher_exe(exe))
             exe.write_bytes(b'<html>not found</html>'); self.assertFalse(self_update.is_launcher_exe(exe))
         self.assertEqual(version_in('ttt2-launcher 0.4.0\r\n'), '0.4.0')
         self.assertEqual(version_in('Python 3.13'), '')
