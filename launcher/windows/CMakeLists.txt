@@ -19,3 +19,7 @@ add_test(NAME windows_launcher_keys_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_C
 # unpacks its files (as entry.cpp reads them).
 add_test(NAME windows_launcher_exe_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_launcher_exe.py
     $<TARGET_FILE:ttt2-launcher> ${windows_launcher_version})
+# The launcher's own checks are for its developers (CI runs them): a player's
+# setup leaves them out (ctest -LE launcher), as the launcher is already running.
+set_tests_properties(windows_launcher_backend_test windows_first_run_test windows_launcher_update_test
+    windows_launcher_keys_test windows_launcher_exe_test PROPERTIES LABELS launcher)

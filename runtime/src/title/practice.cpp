@@ -154,10 +154,10 @@ void scan(uint8_t* base, uint32_t begin, uint32_t end, std::string_view pattern,
         const uint8_t* from = base + chunk;
         const bool across = chunk + size < end && guest_memory_committed(chunk + size, 64);
         const size_t length = size + (across ? 64 : 0); // across the chunk's end
-        for (const uint8_t* p = from; (p = static_cast<const uint8_t*>(
-                                           memmem(p, length - (p - from), pattern.data(), pattern.size()))) != nullptr;
-             ++p) {
-            if (p > base + kScanStart) found(p);
+        // (string_view's find, as memmem is not in Windows' C library)
+        const std::string_view text(reinterpret_cast<const char*>(from), length);
+        for (size_t at = text.find(pattern); at != std::string_view::npos; at = text.find(pattern, at + 1)) {
+            if (from + at > base + kScanStart) found(from + at);
         }
     }
 }

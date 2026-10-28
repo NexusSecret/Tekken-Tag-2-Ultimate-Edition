@@ -82,6 +82,17 @@ if(TTT2_TOOLS_ONLY)
     if(TTT2_WINDOWS_RUNTIME)
         include(cmake/WindowsRuntime.cmake)
     endif()
+    if(WIN32)
+        # Every test above as one target (each is named after its program), so
+        # the setup scripts build all that ctest runs: none is left "Not Run".
+        add_custom_target(windows_checks)
+        get_property(windows_tests DIRECTORY PROPERTY TESTS)
+        foreach(windows_test IN LISTS windows_tests)
+            if(TARGET ${windows_test})
+                add_dependencies(windows_checks ${windows_test})
+            endif()
+        endforeach()
+    endif()
     return()
 endif()
 
