@@ -114,7 +114,13 @@ def run_command(command, settings):
     if result: raise RuntimeError('Task exited with code %d; see the log above.' % result)
 
 
-def worker(settings, action, names):
+def built_by(settings):
+    """The launcher version whose files built the game in the build folder ('' when unknown)."""
+    file = settings.build / 'ttt2-launcher-version.txt'
+    return file.read_text(encoding='utf-8').strip() if file.is_file() else ''
+
+
+def worker(settings, action, names, cancelled=lambda: False):
     os.environ.update(settings.environment())
     sys.path[:0] = [str(settings.root / 'local/windows-python'), str(settings.root / 'tools/characters'), str(Path(settings.values['tools']) / 'python')]
     if action == 'setup':
@@ -126,6 +132,11 @@ def worker(settings, action, names):
             raise ValueError('Select the Windows build tools folder in Paths first.')
         run_command(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
                      str(settings.root / 'tools/build_windows_runtime.ps1'), '-ToolsRoot', str(tools)], settings)
+    elif action == 'launcher':
+        import self_update
+        exe = self_update.running_exe()
+        if not exe: raise ValueError('Only the release .exe updates itself, and this launcher was not opened from one.')
+        self_update.update(exe, cancelled)
     elif action in ('install', 'update'):
         run_command(settings.installer_command(action == 'update'), settings)
     elif action in ('import', 'remove'):
@@ -147,6 +158,9 @@ def worker(settings, action, names):
         sys.argv = command[2:]
         runpy.run_path(command[2], run_name='__main__')
     else: raise ValueError('Unknown task: ' + action)
+    if action in ('setup', 'build'):
+        import self_update
+        (settings.build / 'ttt2-launcher-version.txt').write_text(self_update.version() + '\n', encoding='utf-8')
 
 
 def fighters(settings):

@@ -73,6 +73,11 @@ class LauncherBackend(unittest.TestCase):
         folder.mkdir();(folder/'.ttt2-install').touch()
         self.assertEqual(self.settings.installer_command(True),[str(exe),'--update',str(folder)])
 
+    def test_only_release_exe_updates_itself(self):
+        from backend import worker
+        with mock.patch.dict(os.environ, {'TTT2_LAUNCHER_EXE': ''}), self.assertRaisesRegex(ValueError, 'release .exe'):
+            worker(self.settings, 'launcher', [])
+
 class T8Extraction(unittest.TestCase):
     def extract(self, names, complete=True):
         from backend import worker

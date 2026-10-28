@@ -8,17 +8,20 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import traceback
 import contextlib
+import webbrowser
 
-from backend import Settings, fighters, worker
+from backend import Settings, built_by, fighters, worker
+import self_update
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--config', type=Path)
-    parser.add_argument('--worker', choices=('setup', 'build', 'install', 'update', 'import', 'remove'))
+    parser.add_argument('--worker', choices=('setup', 'build', 'install', 'update', 'import', 'remove', 'launcher'))
     parser.add_argument('--cancel-file', type=Path)
     parser.add_argument('--ui-smoke-test', type=Path)
     parser.add_argument('--check', action='store_true')
@@ -26,7 +29,9 @@ def main():
     args = parser.parse_args()
     settings = Settings(args.build_dir, args.config)
     if args.worker:
-        if args.cancel_file:
+        cancelled = lambda: bool(args.cancel_file and args.cancel_file.exists())
+        # (The launcher's update stops only where it can: never half-way through replacing the .exe.)
+        if args.cancel_file and args.worker != 'launcher':
             def watch_cancel():
                 import _thread
                 while not args.cancel_file.exists():
@@ -34,10 +39,16 @@ def main():
                 _thread.interrupt_main()
             threading.Thread(target=watch_cancel, daemon=True).start()
         try:
-            worker(settings, args.worker, args.fighters)
+            worker(settings, args.worker, args.fighters, cancelled)
         except KeyboardInterrupt:
             print('Cancelled. Completed extraction data is kept.', flush=True)
             return 130
+        except self_update.Cancelled:
+            print('Update cancelled. The launcher is as it was.', flush=True)
+            return 130
+        except self_update.UpdateError as error:
+            print('@error ' + str(error), flush=True)
+            return 1
         return 0
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
@@ -54,16 +65,31 @@ def main():
     style.configure('Title.TLabel', font=('Segoe UI', 20, 'bold'))
     style.configure('TButton', padding=(10, 6))
     frame = ttk.Frame(window, padding=18); frame.pack(fill='both', expand=True)
-    ttk.Label(frame, text='Tekken Tag Tournament 2', style='Title.TLabel').pack(anchor='w')
-    ttk.Label(frame, text='Ultimate Edition  •  Windows', font=('Segoe UI', 11)).pack(anchor='w', pady=(0, 12))
+    launcher_exe = self_update.running_exe()
+    header = ttk.Frame(frame); header.pack(fill='x'); header.columnconfigure(0, weight=1)
+    ttk.Label(header, text='Tekken Tag Tournament 2', style='Title.TLabel').grid(row=0, column=0, sticky='w')
+    ttk.Label(header, text='Ultimate Edition  •  Windows  •  Ultimate Launcher ' + self_update.version(),
+              font=('Segoe UI', 11)).grid(row=1, column=0, sticky='w', pady=(0, 12))
+    # The release .exe's own update (self_update.py): a notice when a newer
+    # version is out, and a button that also looks for one any time.
+    update_button = ttk.Button(header, text='Check for Updates', command=lambda: update_launcher())
+    if launcher_exe: update_button.grid(row=0, column=1, rowspan=2, sticky='ne')
+    notice = ttk.Frame(frame, padding=(12, 8), relief='solid', borderwidth=1); notice.columnconfigure(0, weight=1)
+    notice_title, notice_detail = tk.StringVar(), tk.StringVar()
+    ttk.Label(notice, textvariable=notice_title, font=('Segoe UI', 11, 'bold')).grid(row=0, column=0, sticky='w')
+    ttk.Label(notice, textvariable=notice_detail).grid(row=1, column=0, sticky='w')
+    whats_new = ttk.Button(notice, text="What's New", command=lambda: open_release_page())
+    whats_new.grid(row=0, column=1, rowspan=2, padx=(8, 0))
+    notice_update = ttk.Button(notice, text='Update', command=lambda: update_launcher())
+    notice_update.grid(row=0, column=2, rowspan=2, padx=(8, 0))
     tabs = ttk.Notebook(frame); tabs.pack(fill='both', expand=True)
     home = ttk.Frame(tabs, padding=14); tabs.add(home, text='Game & Fighters')
     paths_tab = ttk.Frame(tabs, padding=14); tabs.add(paths_tab, text='Paths')
     display_tab = ttk.Frame(tabs, padding=14); tabs.add(display_tab, text='Settings')
     events = queue.Queue()
-    state = dict(process=None, game=None, log=None, cancel=None)
+    state = dict(process=None, game=None, log=None, cancel=None, action=None, error='', updated='')
     fields = {k: tk.StringVar(value=v) for k, v in settings.values.items()}
-    buttons = []
+    buttons = [update_button, notice_update]
     status = tk.StringVar(value='Ready')
     game_status = tk.StringVar()
     ttk.Label(home, textvariable=game_status, wraplength=880).pack(anchor='w', pady=(0, 8))
@@ -85,7 +111,12 @@ def main():
 
     def refresh():
         folder = settings.installed()
-        game_status.set('Installed: ' + str(folder) if folder else 'Development build: ' + str(settings.build))
+        text = 'Installed: ' + str(folder) if folder else 'Development build: ' + str(settings.build)
+        built = built_by(settings)
+        if built and built != self_update.version():
+            text += ('\nThe game was built by Ultimate Launcher %s; this is %s. Click Build / Rebuild, then '
+                     'Update installed game, to bring its changes to the game.' % (built, self_update.version()))
+        game_status.set(text)
         selected = tree.selection()
         tree.delete(*tree.get_children())
         try:
@@ -112,7 +143,7 @@ def main():
     def start(action, names=()):
         try:
             if state['process']: raise ValueError('Another task is running.')
-            if state['game'] and state['game'].poll() is None:
+            if action != 'launcher' and state['game'] and state['game'].poll() is None:
                 raise ValueError('Close the game before building, installing, or changing fighters.')
             save_paths()
             if action == 'setup':
@@ -133,9 +164,12 @@ def main():
                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             state['cancel'] = cancel
             state['log'] = logfile
-            output.delete('1.0', 'end'); status.set(action.capitalize() + ' running. Log: ' + str(logfile))
+            state.update(action=action, error='', updated='')
+            label = 'Launcher update' if action == 'launcher' else action.capitalize()
+            output.delete('1.0', 'end'); status.set(label + ' running. Log: ' + str(logfile))
             for button in buttons: button.configure(state='disabled')
-            cancel_button.configure(state='normal' if action in ('import', 'remove') else 'disabled')
+            cancel_button.configure(state='normal' if action in ('import', 'remove', 'launcher') else 'disabled',
+                                    text='Cancel update' if action == 'launcher' else 'Cancel import')
             progress.configure(mode='indeterminate'); progress.start(12)
             process = state['process']
             def collect():
@@ -163,6 +197,47 @@ def main():
                 'Your original archive is kept. Continue?', parent=window): return
         fields['source'].set(source); fields['install'].set(folder)
         start('setup')
+
+    release = dict(newer=None, checking=False, time=time.monotonic())  # (the first check is below, at the start)
+    def show_update_notice():
+        newer = release['newer']
+        if launcher_exe and newer:
+            notice_title.set('Version %s of the launcher is out' % newer.version)
+            notice_detail.set('You have %s. Update replaces this launcher with it and opens it.' % self_update.version())
+            if newer.page.startswith('https://') or (self_update.custom_releases() and newer.page): whats_new.grid()
+            else: whats_new.grid_remove()
+            update_button.configure(text='Update to ' + newer.version)
+            notice.pack(fill='x', pady=(0, 10), before=tabs)
+        else:
+            notice.pack_forget(); update_button.configure(text='Check for Updates')
+    def release_known(answer):
+        # (A newer release without its .exe yet is not offered.)
+        if answer.none: release['newer'] = None
+        elif answer.release:
+            newer = self_update.compare_versions(answer.release.version, self_update.version()) > 0
+            release['newer'] = answer.release if newer else None
+        show_update_notice()
+    def check_release():
+        if not launcher_exe or release['checking']: return
+        release.update(checking=True, time=time.monotonic())
+        def ask():
+            # (Quietly: no notice when GitHub cannot be asked now.)
+            try:
+                answer = self_update.ask()
+                if answer.error: print('Ultimate Launcher:', answer.error, flush=True)
+            except Exception as error:
+                print('Ultimate Launcher: GitHub cannot be asked for a newer version:', self_update.reason(error), flush=True)
+                answer = None
+            events.put(('release', answer))
+        threading.Thread(target=ask, daemon=True).start()
+    def open_release_page():
+        if release['newer'] and release['newer'].page: webbrowser.open(release['newer'].page)
+    def update_launcher():
+        why = self_update.cannot_replace(launcher_exe)
+        if why:
+            return show_error('The launcher cannot update itself: its folder, %s, cannot be written to (%s). '
+                              'Move it to a folder of yours, then update it.' % (launcher_exe.parent, why))
+        start('launcher')
 
     button(bar, 'Set Up Game', first_setup)
     button(bar, 'Play', launch_game)
@@ -249,7 +324,9 @@ def main():
     bottom = ttk.Frame(frame); bottom.pack(fill='x')
     def cancel():
         if state['cancel']:
-            state['cancel'].touch(); status.set('Stopping after the current operation; waiting for importer cleanup…')
+            state['cancel'].touch()
+            status.set('Stopping the update…' if state['action'] == 'launcher' else
+                       'Stopping after the current operation; waiting for importer cleanup…')
             cancel_button.configure(state='disabled')
     cancel_button = ttk.Button(bottom, text='Cancel import', command=cancel, state='disabled'); cancel_button.pack(side='left')
     def open_logs():
@@ -270,7 +347,12 @@ def main():
         try:
             while True:
                 kind, payload = events.get_nowait()
-                if kind == 'line':
+                if kind == 'release':
+                    release['checking'] = False
+                    if payload: release_known(payload)
+                elif kind == 'line':
+                    if payload.startswith('@error '): state['error'] = payload[7:].strip()
+                    elif payload.startswith('@launcher-updated '): state['updated'] = payload[18:].strip()
                     output.insert('end', payload); output.see('end')
                     if payload.startswith('@progress '):
                         words=payload.split()
@@ -288,9 +370,25 @@ def main():
                     # The installer may choose a child directory for a nonempty destination.
                     settings.values.update(json.loads(settings.file.read_text(encoding='utf-8')))
                     for key, value in settings.values.items(): fields[key].set(value)
-                    status.set('Task complete.' if payload == 0 else 'Task stopped (code %s). See the saved log.' % payload)
+                    if state['action'] != 'launcher':
+                        status.set('Task complete.' if payload == 0 else 'Task stopped (code %s). See the saved log.' % payload)
+                    elif payload == 130: status.set('Update cancelled. The launcher is as it was.')
+                    elif payload != 0: status.set(state['error'] or 'Update failed (code %s). See the saved log.' % payload)
+                    # (Else its last step says how it went.)
                     refresh()
-                    if payload not in (0, 130):
+                    if state['updated'] and payload == 0:
+                        # The new launcher opens once this one has closed.
+                        try:
+                            self_update.open_updated(launcher_exe)
+                            window.destroy(); return
+                        except OSError as error:
+                            status.set('Updated to %s, but it cannot be opened. Start the launcher again.' % state['updated'])
+                            messagebox.showerror('Ultimate Launcher', 'Updated to %s, but it cannot be opened (%s). '
+                                                 'Start the launcher again.' % (state['updated'], self_update.reason(error)),
+                                                 parent=window)
+                    elif state['error']:
+                        messagebox.showerror('Update failed', state['error'], parent=window)
+                    elif payload not in (0, 130):
                         messagebox.showerror('Task failed',
                             'The task could not finish. Your error details were saved to:\n\n' +
                             str(state['log']) + '\n\nClick Open latest log below and send that file for help. '
@@ -303,7 +401,12 @@ def main():
                                 'The launcher stays open so cleanup and logging can finish.', parent=window)
         else: window.destroy()
     window.protocol('WM_DELETE_WINDOW', close)
+    # A newer launcher is looked for when the window opens, and again when it
+    # is back in front after a while.
+    window.bind('<FocusIn>', lambda event: check_release()
+                if time.monotonic() - release['time'] >= self_update.CHECK_SECONDS else None, add='+')
     refresh(); load_display(); pump()
+    if launcher_exe and not args.ui_smoke_test: window.after(1000, check_release)
     smoke_errors = []
     if args.ui_smoke_test:
         def smoke_body():

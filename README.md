@@ -140,6 +140,29 @@ dumps from the debugging options under `local/` too.
 
 ### Windows launcher
 
+**Starting from a release (Windows 10/11, x64):**
+
+1. Download `Ultimate_Launcher-x86_64.exe` from the newest release and put it
+   in a folder of yours (not Program Files: it replaces itself when it updates).
+2. Double-click it. The first start unpacks the launcher's files into
+   `%LOCALAPPDATA%\TTT2Ultimate\launcher` and gets its private Python ready
+   in a console window; later starts open the launcher at once.
+3. Continue with **Set Up Game** as in step 3 below. The tools, the build
+   and the generated code stay in that folder too (plan its 30 GB on that drive).
+
+The release launcher updates itself. When it starts (and when its window is
+back in front after six hours) it asks GitHub for this repository's newest
+release; when that is newer, a notice at the top of the window says so, with
+**What's New** (the release's page) and **Update**, and the button at the
+top right says **Update to** its version (that button also looks for an update
+any time). Update downloads the new `.exe` beside the one you started, checks
+it (its size, GitHub's SHA-256, that it is a 64-bit Windows launcher and says
+it is that version), puts it in that one's place and opens it: it unpacks its
+files over the old ones, keeping everything else there. Anything failing, or
+Cancel, leaves the `.exe` as it was. A launcher whose version differs from
+the one that built the game says so: **Build / Rebuild**, then **Update
+installed game**, bring the new version's changes to the game.
+
 **Starting from a downloaded project ZIP (Windows 10/11, x64):**
 
 1. Download this branch as a ZIP and **Extract All** into a writable folder.
@@ -186,10 +209,12 @@ marked **Update available** still load: this compares revisions from the shared
 importer and never automatically rebuilds anything.
 
 Task/game logs are saved under the selected data folder's `logs/` directory;
-startup errors are saved beside the executable in `launcher.log`. Build/install
+startup errors are saved beside the executable in `launcher.log` (the release
+`.exe`'s in `local/launcher.log` of its folder in `%LOCALAPPDATA%`). Build/install
 tasks finish before the window closes. Import cancellation requests cleanup and
-keeps completed extraction data. This frontend does not implement AppImage
-self-updates, the GTK key-capture screen, or the Linux uninstall interface.
+keeps completed extraction data. Only the release `.exe` updates itself (a
+project ZIP is updated as a whole); this frontend does not implement the GTK
+key-capture screen or the Linux uninstall interface.
 
 
 `ttt2-launcher` (**Ultimate Launcher**) does the installing and
@@ -256,9 +281,22 @@ window says so, with **What's New** (the release's page) and **Update**,
 and the button left of Check Again is highlighted (that button also looks
 for an update any time). Update downloads the new AppImage (with curl or
 wget), checks it, puts it in place of the AppImage you started and opens it. A release is tagged `v<version>` (`v0.1.1`) with
-the AppImage attached, built with that version as `TTT2_LAUNCHER_VERSION` in
-`launcher/builder/CMakeLists.txt`: before it replaces anything the launcher
+the AppImage and the Windows launcher attached, both built with that version as `TTT2_LAUNCHER_VERSION` in
+`launcher/builder/CMakeLists.txt`: before it replaces anything each launcher
 checks that the new one says it is that version (`ttt2-launcher --version`).
+
+The Windows launcher of a release is made on Linux too, from a commit:
+
+```bash
+python3 launcher/windows/make_launcher_exe.py Ultimate_Launcher-x86_64.exe
+```
+
+It is `launcher/windows/entry.cpp` compiled with MinGW-w64
+(`x86_64-w64-mingw32-g++`; `--cxx` names another, `--stub` takes a launcher
+CMake built for Windows), with the icon and version details when
+`rsvg-convert` and `windres` are there, and the project's tracked files
+appended (nothing of the game). Attach it to the release as it is named
+here: each launcher takes its own file from a release (`.AppImage`, `.exe`).
 
 ## Playing
 

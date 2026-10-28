@@ -32,6 +32,9 @@ jobs:
       - run: ctest --test-dir build-linux --output-on-failure --timeout 180
       - run: python launcher/windows/test_backend.py
       - run: python launcher/windows/test_setup.py
+      - run: python launcher/windows/test_self_update.py
+      - name: Windows release launcher
+        run: python launcher/windows/make_launcher_exe.py build-linux/Ultimate_Launcher-x86_64.exe
   windows:
     name: Windows portable tools and importer
     runs-on: windows-latest
