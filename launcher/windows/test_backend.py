@@ -96,6 +96,42 @@ class LauncherBackend(unittest.TestCase):
                                          "undeclared identifier 'memmem'")
         self.assertEqual(failure(['Configure failed']), '')
 
+class InstallFolderWithAccent(unittest.TestCase):
+    """A tester's: the game installed into a folder with an à, which the installer printed and recorded in the ANSI
+    code page; the launcher read it as UTF-8, kept a folder with U+FFFD and offered Set Up Game again."""
+    def setUp(self):
+        temp=tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
+        self.root=Path(temp.name); self.local=self.root/'Local'; (self.local/'TTT2Ultimate').mkdir(parents=True)
+        self.game=self.root/'Desktop/Novit\u00e0/TTT2'; self.game.mkdir(parents=True)
+        (self.game/'.ttt2-install').write_text('complete')
+        environment=mock.patch.dict(os.environ,LOCALAPPDATA=str(self.local)); environment.start(); self.addCleanup(environment.stop)
+        self.project=self.root/'launcher'; (self.project/'local').mkdir(parents=True)
+    def settings(self):
+        return Settings(self.project/'build',None,self.project)
+    def test_installer_output_in_the_ansi_code_page(self):
+        from backend import decoded, run_command
+        self.assertEqual(decoded('@folder C:\\Novit\u00e0'.encode('cp1252')), '@folder C:\\Novit\u00e0')
+        self.assertEqual(decoded('Novit\u00e0'.encode('utf-8')), 'Novit\u00e0')
+        settings=self.settings(); settings.values['install']=''
+        script='import sys; sys.stdout.buffer.write(b"@folder " + sys.argv[1].encode("cp1252") + b"\\r\\n")'
+        with mock.patch('builtins.print'):
+            run_command([sys.executable,'-c',script,str(self.game)],settings)
+        self.assertEqual(settings.values['install'],str(self.game))
+        self.assertEqual(self.settings().installed(),self.game)
+    def test_record_in_the_ansi_code_page_is_read(self):
+        (self.local/'TTT2Ultimate/installed').write_bytes(str(self.game).encode('cp1252')+b'\n')
+        self.assertEqual(self.settings().installed(),self.game)
+    def test_setting_read_wrongly_before_is_repaired(self):
+        from backend import write_json
+        write_json(self.project/'local/windows-launcher.json',{'install':str(self.game).replace('\u00e0','\ufffd')})
+        self.assertEqual(self.settings().installed(),self.game)
+        (self.local/'TTT2Ultimate/installed').write_bytes(str(self.game).encode('cp1252')+b'\n')
+        self.assertEqual(self.settings().installed(),self.game)
+    def test_letters_the_code_page_has_not(self):
+        from backend import unreadable_letters
+        self.assertEqual(unreadable_letters('C:/Novit\u00e0/Jos\u00e9'),'')
+        self.assertEqual(unreadable_letters('C:/\u6e38\u620f/TTT2'),'\u620f\u6e38')
+
 class T8Extraction(unittest.TestCase):
     def extract(self, names, complete=True):
         from backend import worker

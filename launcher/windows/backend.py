@@ -1,6 +1,7 @@
 """Windows launcher backend; GTK/Linux code and character conversion stay shared."""
 from pathlib import Path
 import collections
+import glob
 import json
 import os
 import re
@@ -8,6 +9,31 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
+# The game's programs (built with llvm-mingw's libc++) print and write paths in this PC's ANSI code page: the
+# installer's "@folder" line and its record of the folder (%LOCALAPPDATA%\TTT2Ultimate\installed). (cp1252 off
+# Windows: tests.)
+ANSI = 'mbcs' if os.name == 'nt' else 'cp1252'
+
+
+def decoded(data):
+    """Bytes a program wrote: UTF-8, else (an à in a path, say) the ANSI code page."""
+    try:
+        return data.decode('utf-8')
+    except UnicodeDecodeError:
+        return data.decode(ANSI, 'replace')
+
+
+def unreadable_letters(path):
+    """The letters of `path` the game's programs cannot be given (they get their arguments in the ANSI code page)."""
+    return ''.join(sorted({c for c in str(path) if not c.isascii() and not _ansi(c)}))
+
+
+def _ansi(letter):
+    try:
+        letter.encode(ANSI, 'strict')
+        return True
+    except UnicodeEncodeError:
+        return False
 
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -24,7 +50,7 @@ class Settings:
         data = self.root / 'local/windows-userdata/TTT2Ultimate'
         if not data.exists(): data = local
         def first(path):
-            return path.read_text(encoding='utf-8').splitlines()[0] if path.is_file() and path.stat().st_size else ''
+            return decoded(path.read_bytes()).splitlines()[0] if path.is_file() and path.stat().st_size else ''
         tools = ''
         cache = self.build / 'CMakeCache.txt'
         if cache.exists():
@@ -33,10 +59,20 @@ class Settings:
                     tools = str(Path(line.split('=', 1)[1]).parent.parent.parent)
         title = self.root / 'local/wua-game/0000000000000000_v0'
         saves = self.root / 'local/windows-save'
+        recorded = first(local / 'installed')
         self.values = dict(source=first(self.build / 'ttt2-game.txt'), title=str(title) if title.exists() else '',
-                           install=first(local / 'installed'), data=str(data), packs=str(data / 'characters'),
+                           install=recorded, data=str(data), packs=str(data / 'characters'),
                            saves=str(saves if saves.exists() else data / 'save'), tools=tools or str(self.root / 'local/windows-tools'))
         if self.file.exists(): self.values.update(json.loads(self.file.read_text(encoding='utf-8')))
+        if not self.installed(): self.values['install'] = self.found_install(recorded) or self.values['install']
+
+    def found_install(self, recorded):
+        """The install the setting misses: the installer's record of its folder, else the folder the setting names
+        with the letters a launcher read wrongly (an à became U+FFFD); '' when neither is one."""
+        candidates = [recorded] if recorded else []
+        if '\ufffd' in self.values['install']:
+            candidates += sorted(glob.glob(glob.escape(self.values['install']).replace('\ufffd', '?')))
+        return next((c for c in candidates if (Path(c) / '.ttt2-install').is_file()), '')
 
     def save(self):
         if Path(self.values['data']).name != 'TTT2Ultimate':
@@ -122,12 +158,12 @@ def run_command(command, settings):
     print('Starting:', subprocess.list2cmdline(command), flush=True)
     last = collections.deque(maxlen=400)
     with subprocess.Popen(command, cwd=settings.root, env=settings.environment(), stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
-                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)) as process:
+                          stderr=subprocess.STDOUT, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)) as process:
         try:
-            for line in process.stdout:
-                print(line, end='', flush=True)
-                last.append(line.rstrip('\n'))
+            for data in process.stdout:
+                line = decoded(data).rstrip('\r\n')
+                print(line, flush=True)
+                last.append(line)
                 if line.startswith('@folder '):
                     settings.values['install'] = line[8:].strip(); settings.save()
             result = process.wait()

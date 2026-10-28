@@ -132,6 +132,13 @@ def validate_setup_paths(settings):
     if windows_length(tools) > MAX_TOOLS_PATH:
         raise ValueError('The Windows tools folder path is too long. Choose a shorter tools folder '
                          'in Paths, or use a fresh project copy in D:/TTT2. Current tools: ' + str(tools))
+    # The game's installer gets its source and folder in the ANSI code page: a letter it has not is lost.
+    from backend import unreadable_letters
+    for what, key in (('installation folder', 'install'), ('Wii U archive', 'source')):
+        if letters := unreadable_letters(settings.values.get(key) or ''):
+            raise ValueError('The %s path has letters the game\'s installer cannot be given on this PC (%s). Choose one '
+                             'whose path has only plain letters, such as C:/Games/TTT2. Current %s: %s'
+                             % (what, letters, what, settings.values[key]))
     # CMake runs some build steps through batch files it writes in UTF-8, which cmd.exe reads in the console's
     # code page (850 on an Italian Windows): a letter such as à in the path breaks them ("path not found").
     for what, path in (('project folder', settings.root), ('Windows tools folder', tools)):
