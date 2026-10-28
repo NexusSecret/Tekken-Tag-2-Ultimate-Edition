@@ -168,7 +168,9 @@ dumps from the debugging options under `local/` too.
    in a folder of yours (not Program Files: it replaces itself when it updates).
 2. Double-click it. The first start unpacks the launcher's files into
    `%LOCALAPPDATA%\TTT2Ultimate\launcher` and gets its private Python ready
-   in a console window; later starts open the launcher at once.
+   in a console window; later starts open the launcher at once. (When that
+   path has letters beyond plain ASCII, as a user name such as José gives it,
+   the files go to `%PUBLIC%\TTT2Ultimate\launcher` instead: see below.)
 3. Continue with **Set Up Game** as in step 3 below. The tools, the build
    and the generated code stay in that folder too (plan its 30 GB on that drive).
 
@@ -199,7 +201,12 @@ the build's first error; **Open Log** there opens the whole log.
 
 **Starting from a downloaded project ZIP (Windows 10/11, x64):**
 
-1. Download this branch as a ZIP and **Extract All** into a writable folder.
+1. Download this branch as a ZIP and **Extract All** into a writable folder
+   whose path has only plain letters and is short, such as `C:\TTT2`: not in
+   OneDrive (30 GB would be synced). Set Up Game refuses a path with letters
+   such as à: CMake runs some build steps through batch files it writes in
+   UTF-8, which `cmd.exe` reads in the console's code page, so such a letter
+   turns into others and the step finds no folder.
 2. Double-click **Start Ultimate Launcher.cmd** in that folder. The first start
    downloads and verifies a private Python/Tk runtime. No Python installation,
    Git installation, terminal commands or second project download are needed.

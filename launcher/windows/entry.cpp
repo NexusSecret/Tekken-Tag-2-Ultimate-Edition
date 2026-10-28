@@ -4,7 +4,7 @@
 // As CMake builds it, it opens the launcher of the project it was built in.
 // The release's Ultimate_Launcher-x86_64.exe is this program with the
 // project's files in it (make_launcher_exe.py): it keeps them in
-// %LOCALAPPDATA%\TTT2Ultimate\launcher, unpacked again whenever they differ
+// %LOCALAPPDATA%\TTT2Ultimate\launcher (files_folder), unpacked again whenever they differ
 // from the last ones, and opens the launcher from there, which can replace
 // this .exe with a newer release (self_update.py).
 #define WIN32_LEAN_AND_MEAN
@@ -54,6 +54,21 @@ std::wstring quote(const std::wstring& s) {
 std::wstring environment(const wchar_t* name) {
     DWORD n=GetEnvironmentVariableW(name,nullptr,0); if(!n) return {};
     std::wstring result(n,L'\0'); GetEnvironmentVariableW(name,result.data(),n); result.resize(n-1); return result;
+}
+// Where the release keeps its files: %LOCALAPPDATA%\TTT2Ultimate\launcher, unless
+// that path has letters beyond ASCII (a user name such as José): the game is
+// built there, and the batch files CMake writes in UTF-8 lose such letters
+// (cmd.exe reads them in the console's code page). Then %PUBLIC%'s, else the
+// system drive's.
+fs::path files_folder() {
+    const auto data=environment(L"LOCALAPPDATA");
+    if(data.empty()) throw std::runtime_error("LOCALAPPDATA is not set.");
+    const auto drive=environment(L"SystemDrive");
+    for(const auto& base:{data,environment(L"PUBLIC"),drive.empty() ? drive : drive+L"\\"}) {
+        if(!base.empty() && std::all_of(base.begin(),base.end(),[](wchar_t c) { return c<128; }))
+            return fs::path(base)/L"TTT2Ultimate\\launcher";
+    }
+    return fs::path(data)/L"TTT2Ultimate\\launcher";
 }
 std::wstring wide(std::string_view s) {
     if(s.empty()) return {};
@@ -272,9 +287,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int) {
         if(release) {
             wait_for_replaced();
             DeleteFileW((folder/(exe.stem().wstring()+L".old.exe")).c_str()); // (what an update replaced)
-            const auto data=environment(L"LOCALAPPDATA");
-            if(data.empty()) throw std::runtime_error("LOCALAPPDATA is not set.");
-            folder=fs::path(data)/L"TTT2Ultimate\\launcher";
+            folder=files_folder();
             // (Started twice at once: one unpacks, the other then finds the files there.)
             HANDLE lock=CreateMutexW(nullptr,FALSE,L"Local\\TTT2UltimateLauncherFiles");
             if(lock) WaitForSingleObject(lock,INFINITE);
