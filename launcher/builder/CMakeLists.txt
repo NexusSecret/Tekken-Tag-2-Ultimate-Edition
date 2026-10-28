@@ -51,6 +51,8 @@ if(GIT_FOUND)
         RESULT_VARIABLE failed ERROR_QUIET)
     if(NOT failed AND commit)
         string(APPEND TTT2_KIT_VERSION "-${commit}")
+        # (The launcher's too: it asks GitHub what main has beyond it, launcher/app/self_update.cpp.)
+        set(TTT2_LAUNCHER_COMMIT ${commit} PARENT_SCOPE)
         execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --absolute-git-dir
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE git_dir OUTPUT_STRIP_TRAILING_WHITESPACE)
         execute_process(COMMAND ${GIT_EXECUTABLE} symbolic-ref -q HEAD

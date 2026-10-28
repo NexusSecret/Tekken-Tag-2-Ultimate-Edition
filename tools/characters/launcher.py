@@ -3,6 +3,7 @@
 
     python3 tools/characters/launcher.py status [--game FOLDER] [--movesets FOLDER] [--tekken8-movesets FOLDER]
     python3 tools/characters/launcher.py owned
+    python3 tools/characters/launcher.py main --commit SHA
 
 status: what is there, quickly (nothing is started): this Python and whether it has numpy and Pillow (the import
 needs them; this does not), the tools running Tekken 7 or Tekken 8 hidden needs (each game's helper: "helper" Tekken
@@ -29,6 +30,13 @@ the helper runs hidden in Tekken 7's Proton prefix while Proton starts it and it
 running; when it is not (or Tekken 7 cannot be used) the answer is {"error": "<why>"} at once. Steam is never started.
 SIGTERM (the launcher's Cancel) ends the helper's session as its end does, and nothing is printed (exit code 143).
 
+main: what this repository's main branch has that the build of commit SHA (the launcher's) lacks, as GitHub tells
+it, so that a launcher learns of newer changes before a release brings them: {"ahead": how many commits, "head": main's
+commit, "page": GitHub's page comparing them, "changes": the newest commits' titles, "fighters": the fighters main
+gives a newer pack revision than this importer (pack.revision), "new": [{"name", "display"}] the fighters only main
+has}, or {"error": "<why>"} (GitHub cannot be asked, or does not know the commit: a build of commits never pushed).
+Only GitHub is asked ($TTT2_LAUNCHER_GITHUB instead, for tests); nothing is downloaded but the definitions that changed.
+
 The exit code is 0 whenever the object is printed; adding and removing fighters is import_character.py's (--progress).
 Needs only Python 3; works from a read-only copy (nothing is written next to it).
 """
@@ -36,8 +44,12 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -178,6 +190,74 @@ def owned():
     return {'owned': {name: fid not in unowned for fid, name in dlc.items()}}
 
 
+REPOSITORY = 'Petexy/Tekken-Tag-2-Ultimate-Edition'
+DEFINITIONS = 'tools/characters/ttt2char/characters/'
+
+
+def github(path):
+    """A file of the repository as GitHub gives it: the API's /repos/... answers, raw files (raw/<commit>/<path>)."""
+    base = os.environ.get('TTT2_LAUNCHER_GITHUB')
+    if path.startswith('raw/'):
+        url = (base + '/' if base else 'https://raw.githubusercontent.com/' + REPOSITORY + '/') + path[4:]
+    else:
+        url = (base or 'https://api.github.com') + '/repos/' + REPOSITORY + '/' + path
+    request = urllib.request.Request(url, headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'ttt2-launcher'})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.read().decode('utf-8', 'replace')
+    except urllib.error.HTTPError as error:
+        with error: body = error.read().decode('utf-8', 'replace')
+        try:
+            message = json.loads(body).get('message', '')
+        except ValueError:
+            message = ''
+        if 'rate limit' in message.lower():
+            raise LookupError('GitHub answers only so many questions from one network an hour: try again later')
+        raise LookupError(message or 'GitHub answered %d' % error.code)
+
+
+def revision_in(text):
+    found = re.search(r'^REVISION\s*=\s*(\d+)', text, re.M)
+    return int(found.group(1)) if found else 0
+
+
+def main_news(commit, branch='main'):
+    try:
+        try:
+            compare = json.loads(github('compare/%s...%s' % (urllib.parse.quote(commit), urllib.parse.quote(branch))))
+        except LookupError as error:
+            if str(error) != 'Not Found': raise
+            raise LookupError('GitHub does not know commit %s: this launcher was built from changes never pushed'
+                              % commit)
+        ahead, commits = int(compare.get('ahead_by', 0)), compare.get('commits') or []
+        out = {'ahead': ahead, 'head': commits[-1]['sha'] if commits else commit, 'page': compare.get('html_url', ''),
+               'changes': [c['commit']['message'].split('\n')[0] for c in reversed(commits)][:5],
+               'fighters': [], 'new': []}
+        if not ahead: return out
+        files = {f['filename']: f.get('status', '') for f in compare.get('files') or []}
+        main = lambda path: github('raw/%s/%s' % (out['head'], path))
+        # A fighter's pack revision on main: pack.py's REVISION there, and its definition's there.
+        shared = revision_in(main('tools/characters/ttt2char/pack.py')) if 'tools/characters/ttt2char/pack.py' in files \
+            else pack.REVISION
+        for name in CHARACTERS:
+            d = definition(name)
+            path = DEFINITIONS + os.path.basename(d.__file__)
+            if files.get(path) == 'removed': continue
+            own = revision_in(main(path)) if path in files else vars(d).get('REVISION', 0)
+            if shared + own > pack.revision(d): out['fighters'].append(name)
+        if DEFINITIONS + '__init__.py' in files:
+            roster = re.search(r'^CHARACTERS\s*=\s*\(([^)]*)\)', main(DEFINITIONS + '__init__.py'), re.M)
+            for name in re.findall(r"'(\w+)'", roster.group(1) if roster else ''):
+                if name in CHARACTERS: continue
+                shown = re.search(r'^NAME\s*=\s*[\'"](.+?)[\'"]', main(DEFINITIONS + name + '.py'), re.M)
+                out['new'].append({'name': name, 'display': shown.group(1).split(' (')[0] if shown else name})
+        return out
+    except LookupError as error:
+        return {'error': str(error)}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return {'error': 'GitHub cannot be asked: %s' % (getattr(error, 'reason', None) or error)}
+
+
 def main():
     parser = argparse.ArgumentParser(description='Answer the launcher\'s questions about adding fighters, as JSON.')
     commands = parser.add_subparsers(dest='command', required=True)
@@ -189,9 +269,13 @@ def main():
                        help='the saved Tekken 8 movesets\' folder (default: %s)'
                             % '~/.local/share/ttt2/tekken8/movesets')
     commands.add_parser('owned', help='which DLC fighters the Steam account owns (Steam must be running)')
+    asked = commands.add_parser('main', help='what the main branch has that the build of a commit lacks (GitHub)')
+    asked.add_argument('--commit', required=True, help='the launcher\'s build commit')
+    asked.add_argument('--branch', default='main', help=argparse.SUPPRESS)
     args = parser.parse_args()
     signals.stop_on_signals()               # (owned: the launcher's Cancel ends the hidden helper too)
-    answer = status(args.game, args.movesets, args.tekken8_movesets) if args.command == 'status' else owned()
+    answer = (status(args.game, args.movesets, args.tekken8_movesets) if args.command == 'status' else
+              main_news(args.commit, args.branch) if args.command == 'main' else owned())
     print(json.dumps(answer), flush=True)
 
 

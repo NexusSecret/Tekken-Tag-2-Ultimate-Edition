@@ -35,7 +35,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(HERE))
-from self_update import MAGIC, TRAILER, is_launcher_exe, version  # noqa: E402
+from self_update import BUILD_COMMIT, MAGIC, TRAILER, is_launcher_exe, version  # noqa: E402
 
 ICON = REPO / 'launcher/app/io.github.petexy.TekkenTag2UltimateEdition.svg'
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
@@ -169,6 +169,8 @@ def main():
     output = args.output.resolve()
     if not output.parent.is_dir(): die('%s is not a folder' % output.parent)
     files = tracked(args.allow_dirty)
+    # (Its build's commit: the launcher asks GitHub what main has beyond it, self_update.build_commit.)
+    files[BUILD_COMMIT] = git('rev-parse', 'HEAD').strip() + b'\n'
     for needed in ('launcher/windows/main.py', 'Start Ultimate Launcher.cmd', 'launcher/builder/CMakeLists.txt'):
         if needed not in files: die('the project lacks ' + needed)
     with tempfile.TemporaryDirectory(prefix='ttt2-launcher-exe-') as temporary:

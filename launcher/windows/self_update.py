@@ -40,6 +40,8 @@ MAGIC = b'TTT2PAY1'
 VERSION_SECONDS = 60
 # How long between two quiet questions to GitHub, while the window stays open.
 CHECK_SECONDS = 6 * 3600
+# The commit the release .exe was made from (make_launcher_exe.py writes it into its files).
+BUILD_COMMIT = 'launcher/windows/build-commit'
 
 
 class UpdateError(Exception):
@@ -57,6 +59,29 @@ def version(root=ROOT):
     found = re.search(r'^set\(TTT2_LAUNCHER_VERSION ([0-9.]+)\)', text, re.M)
     if not found: raise ValueError('launcher/builder/CMakeLists.txt names no TTT2_LAUNCHER_VERSION')
     return found.group(1)
+
+
+def build_commit(root=ROOT):
+    """The commit these files are: the release .exe's, else a Git checkout's HEAD; None when not known
+    (a project ZIP)."""
+    file = Path(root) / BUILD_COMMIT
+    if file.is_file(): return file.read_text(encoding='utf-8').strip() or None
+    git = Path(root) / '.git'
+    try:
+        if git.is_file():       # (a worktree: its Git folder is named there, its branches in the shared one)
+            git = (Path(root) / git.read_text(encoding='utf-8').split('gitdir:', 1)[1].strip()).resolve()
+        shared = (git / (git / 'commondir').read_text(encoding='utf-8').strip()).resolve() \
+            if (git / 'commondir').is_file() else git
+        head = (git / 'HEAD').read_text(encoding='utf-8').strip()
+        if not head.startswith('ref: '): return head
+        ref = head[5:]
+        for folder in (git, shared):
+            if (folder / ref).is_file(): return (folder / ref).read_text(encoding='utf-8').strip()
+        for line in (shared / 'packed-refs').read_text(encoding='utf-8').splitlines():
+            if line.endswith(' ' + ref): return line.split()[0]
+    except (OSError, IndexError):
+        pass
+    return None
 
 
 def version_numbers(text):

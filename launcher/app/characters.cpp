@@ -273,6 +273,9 @@ GtkWidget* Launcher::fighter_row(const Fighter& f, bool usable) {
     } else if (f.stand_in) {
         state_label = ui::label("Heihachi's moves", "pill neutral", false);
         ui::set_tooltip(state_label, "They fight with Heihachi's moves until their own can be saved (see above).");
+    } else if (f.added() && newer_on_main(f.name)) {
+        state_label = ui::label("Newer on main", "pill neutral", false);
+        ui::set_tooltip(state_label, "Main has an update for them: it comes with the next release.");
     } else if (f.installed) {
         state_label = ui::label("Added", "pill ok", false);
     } else if (f.dlc != 0 && owned) {
@@ -494,6 +497,15 @@ void Launcher::show_characters() {
         gtk_grid_attach(GTK_GRID(facts), needed, 1, row, 1, 1);
     }
     gtk_box_append(GTK_BOX(card), facts);
+    if (main_news_ && !main_news_->fresh.empty()) {
+        const auto& fresh = main_news_->fresh;
+        std::string names;
+        for (size_t i = 0; i < fresh.size(); ++i) {
+            names += (i == 0 ? "" : i + 1 == fresh.size() ? " and " : ", ") + fresh[i].second;
+        }
+        note_line(card, "dialog-information-symbolic", "Main adds " + names + ": they come with the next release.",
+                  false);
+    }
 
     // Each game's characters: the one installed first.
     if (!s.tekken7_found && s.tekken8_found) {

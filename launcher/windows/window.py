@@ -73,6 +73,8 @@ class Window:
         self.status, self.status_error, self.status_loading, self.status_time = None, '', False, 0.0
         self.owned, self.owned_state = None, 'unknown'
         self.release = dict(newer=None, checking=False, time=time.monotonic())
+        # What main has beyond this build (launcher.py main), when its commit is known.
+        self.commit, self.main_news, self.main_checking = self_update.build_commit(), None, False
         self.dlc_open, self.picking, self.page = False, None, 'main'
         self.root.report_callback_exception = self.callback_failed
         self.build_header()
@@ -92,6 +94,7 @@ class Window:
         self.refresh()
         self.pump()
         if self.exe and not args.ui_smoke_test: self.root.after(1000, self.check_release)
+        if self.commit and not args.ui_smoke_test: self.root.after(1500, self.check_main)
         if args.ui_smoke_test: self.root.after(500, self.smoke_test)
 
     def run(self):
@@ -391,6 +394,10 @@ class Window:
                     'own.', 'small', wrap=True).pack(fill='x', pady=(px(2), 0))
         why = self.can_import()
         if why: self.note(card, 'warning', why, WARN)
+        fresh = [n['display'] for n in self.main_news['new']] if self.main_news else []
+        if fresh:
+            names = fresh[0] if len(fresh) == 1 else ', '.join(fresh[:-1]) + ' and ' + fresh[-1]
+            self.note(card, 'info', 'Main adds %s: they come with the next release.' % names)
         for game in ('tekken7', 'tekken8'):
             tk.Frame(card, bg=CARD_LINE, height=1).pack(fill='x', pady=(px(18), px(16)))
             self.show_game_characters(card, game)
@@ -508,6 +515,8 @@ class Window:
                     'them what this version adds.')
         if f.get('stand_in'):
             return 'Heihachi\'s moves', 'neutral', 'They fight with Heihachi\'s moves until their own can be saved.'
+        if self.main_news and f['name'] in self.main_news['fighters'] and self.added(f):
+            return 'Newer on main', 'neutral', 'Main has an update for them: it comes with the next release.'
         if f['installed']: return 'Added', 'ok', None
         if f['dlc'] and owned is not None: return ('Owned' if owned else 'Not owned'), None, None
         return None
@@ -572,29 +581,47 @@ class Window:
 
     def focused(self, event):
         if event.widget is not self.root: return
-        if time.monotonic() - self.release['time'] >= self_update.CHECK_SECONDS: self.check_release()
+        if time.monotonic() - self.release['time'] >= self_update.CHECK_SECONDS:
+            self.check_release()
+            self.check_main()
         if not self.busy() and not self.status_loading and time.monotonic() - self.status_time > 5:
             self.refresh()
 
     # ---------------------------------------------------------------- the launcher's own update
 
     def show_notice(self):
-        newer = self.release['newer']
+        newer, news = self.release['newer'], self.main_news
         L = self.look
-        if self.exe and newer:
-            self.notice_title.configure(text='Version %s of the launcher is out' % newer.version)
-            self.notice_detail.configure(text='You have %s. Update replaces this launcher with it and opens it.'
-                                         % self.version)
-            show_page = newer.page.startswith('https://') or (self_update.custom_releases() and newer.page)
-            if show_page and not self.notice_page.winfo_ismapped(): self.notice_page.pack(side='right', padx=(0, L.px(8)))
-            if not show_page: self.notice_page.pack_forget()
-            self.notice_update.configure(state='disabled' if self.busy() else 'normal')
-            self.update_button.configure(image=L.icon('update', 16, NOTICE_ICON))
-            self.update_button.tooltip.text = 'Update the launcher to version %s (this is version %s)' % (
-                newer.version, self.version)
+        if (self.exe and newer) or (news and news['ahead']):
+            if self.exe and newer:
+                self.notice_title.configure(text='Version %s of the launcher is out' % newer.version)
+                self.notice_detail.configure(text='You have %s. Update replaces this launcher with it and opens it.'
+                                             % self.version)
+                self.notice_link = newer.page
+                show_page = newer.page.startswith('https://') or (self_update.custom_releases() and newer.page)
+                self.notice_update.configure(state='disabled' if self.busy() else 'normal')
+            else:
+                # Newer changes on main, before a release has them (as the Linux launcher says).
+                count = news['ahead']
+                self.notice_title.configure(text='Newer changes are on main')
+                newest = (', the newest: \u201c%s\u201d' % news['changes'][0]) if news['changes'] else ''
+                self.notice_detail.configure(text='%d change%s since this version (%s, %s)%s. They come with the next '
+                                             'release.' % (count, '' if count == 1 else 's', self.version,
+                                                           self.commit[:7], newest))
+                self.notice_link = news['page']
+                show_page = news['page'].startswith('https://') or bool(os.environ.get('TTT2_LAUNCHER_GITHUB'))
+            self.notice_update.pack_forget()
+            self.notice_page.pack_forget()
+            if self.exe and newer: self.notice_update.pack(side='right')
+            if show_page: self.notice_page.pack(side='right', padx=(0, L.px(8)))
+            if self.exe and newer:
+                self.update_button.configure(image=L.icon('update', 16, NOTICE_ICON))
+                self.update_button.tooltip.text = ('Update the launcher to version %s (this is version %s)'
+                                                   % (newer.version, self.version))
             if not self.notice.winfo_ismapped(): self.notice.pack(fill='x', pady=(0, L.px(14)), before=self.banner)
         else:
             self.notice.pack_forget()
+        if not (self.exe and newer):
             self.update_button.configure(image=L.icon('update', 16, TEXT))
             self.update_button.tooltip.text = 'Update the launcher (this is version %s)' % self.version
 
@@ -624,7 +651,26 @@ class Window:
         self.show_notice()
 
     def open_release_page(self):
-        if self.release['newer'] and self.release['newer'].page: webbrowser.open(self.release['newer'].page)
+        if getattr(self, 'notice_link', ''): webbrowser.open(self.notice_link)
+
+    def check_main(self):
+        if not self.commit or self.main_checking: return
+        self.main_checking = True
+        def ask():
+            try:
+                answer = importer(self.settings, 'main', '--commit', self.commit, timeout=120)
+            except Exception as error:
+                answer = {'error': str(error)}
+            self.events.put(('main', answer))
+        threading.Thread(target=ask, daemon=True).start()
+
+    def main_known(self, answer):
+        self.main_checking = False
+        # (Quietly: no notice when GitHub cannot be asked now, or does not know this build.)
+        if 'error' in answer: return print('Ultimate Launcher: main:', answer['error'], flush=True)
+        self.main_news = answer
+        self.show_notice()
+        self.show_characters()
 
     def update_launcher(self):
         if not self.exe: return
@@ -846,6 +892,7 @@ class Window:
                 elif kind == 'status': self.status_known(payload)
                 elif kind == 'owned': self.owned_known(payload)
                 elif kind == 'release': self.release_known(payload)
+                elif kind == 'main': self.main_known(payload)
         except queue.Empty:
             pass
         except tk.TclError:
