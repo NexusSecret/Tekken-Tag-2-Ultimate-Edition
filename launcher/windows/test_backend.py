@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from unittest import mock
 from backend import Settings, write_json
+# T8Extraction patches ttt2char before worker() puts tools/characters on the path.
+sys.path.append(str(Path(__file__).resolve().parents[2] / 'tools/characters'))
 
 class LauncherBackend(unittest.TestCase):
     def setUp(self):
