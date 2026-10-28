@@ -69,6 +69,10 @@ class LauncherExe(unittest.TestCase):
         self.assertFalse((self.folder / 'escape.txt').exists())
         self.assertFalse(root.exists() and any(root.rglob('*.txt')))
 
+    # (make_launcher_exe.py packs Git's tracked files: a player's launcher folder is no Git checkout, and Set Up
+    # Game runs these tests there.)
+    @unittest.skipUnless((Path(__file__).resolve().parents[2] / '.git').exists() and shutil.which('git'),
+                         'needs a Git checkout of the project')
     def test_project_release_exe(self):
         out = self.folder / 'Ultimate_Launcher-x86_64.exe'
         subprocess.run([sys.executable, str(Path(__file__).with_name('make_launcher_exe.py')), '--stub', str(STUB),
