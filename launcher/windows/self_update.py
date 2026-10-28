@@ -9,12 +9,19 @@ one that was started, checks it (its size, the SHA-256 GitHub gives, that it
 is a 64-bit Windows program with its files, and that it says it is the
 version it was released as), puts it in that one's place and opens it as this
 launcher closes. Anything failing leaves the .exe as it was.
+
+A test build's .exe (one made from a branch other than main) updates its files
+instead: when its branch has newer commits on GitHub, Update downloads the
+newest one's files and puts them in place of the ones the .exe unpacked
+(update_files), so a fix pushed to the branch reaches testers without a new
+.exe.
 """
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 import contextlib
 import hashlib
+import io
 import json
 import os
 import re
@@ -23,7 +30,9 @@ import subprocess
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 # The newest release as GitHub's API gives it (drafts and pre-releases are
@@ -42,6 +51,11 @@ VERSION_SECONDS = 60
 CHECK_SECONDS = 6 * 3600
 # The commit the release .exe was made from (make_launcher_exe.py writes it into its files).
 BUILD_COMMIT = 'launcher/windows/build-commit'
+# The branch it was made from: main for a release, another for a test build.
+BUILD_BRANCH = 'launcher/windows/build-branch'
+# What entry.cpp unpacked last: their SHA-256, then their paths.
+STAMP = 'local/launcher-files.txt'
+REPOSITORY = 'Petexy/Tekken-Tag-2-Ultimate-Edition'
 
 
 class UpdateError(Exception):
@@ -84,6 +98,33 @@ def build_commit(root=ROOT):
     return None
 
 
+def build_branch(root=ROOT):
+    """The branch the release .exe was made from; None when not known."""
+    file = Path(root) / BUILD_BRANCH
+    return (file.read_text(encoding='utf-8').strip() or None) if file.is_file() else None
+
+
+def test_branch(root=ROOT):
+    """The branch whose newer commits update these files in place (update_files): a test build's; None for a
+    release (main's), a Git checkout or a project ZIP."""
+    branch = build_branch(root)
+    return branch if branch and branch != 'main' and (Path(root) / STAMP).is_file() else None
+
+
+def files_id(root=ROOT):
+    """What the game built from these files is said to be from: the version, and the commit when the .exe's
+    files are (so that a test build's update of its files asks for the game to be built again)."""
+    file = Path(root) / BUILD_COMMIT
+    commit = file.read_text(encoding='utf-8').strip() if file.is_file() else ''
+    return version(root) + (' ' + commit if commit else '')
+
+
+def shown_id(text):
+    """files_id() for the player: "0.4.0 (396cc69)"."""
+    number, _, commit = text.partition(' ')
+    return number + (' (%s)' % commit[:7] if commit else '')
+
+
 def version_numbers(text):
     """A version's numbers ("0.1.0", "v0.2", "V1.10.3"); None when it is not one."""
     if text[:1] in ('v', 'V'): text = text[1:]
@@ -100,6 +141,13 @@ def compare_versions(a, b):
     n = max(len(x), len(y))
     x, y = x + [0] * (n - len(x)), y + [0] * (n - len(y))
     return (x > y) - (x < y)
+
+
+def newer_release(number, root=ROOT):
+    """Whether a release of version `number` is newer than these files: a later version, or, for a test
+    build, its own version's release (which comes after the tests)."""
+    order = compare_versions(number, version(root))
+    return order is not None and (order > 0 or order == 0 and test_branch(root) is not None)
 
 
 @dataclass
@@ -316,7 +364,7 @@ def update(exe, cancelled=lambda: False, say=lambda line: print(line, flush=True
     except OSError as error:
         raise UpdateError('GitHub cannot be reached: %s.' % reason(error))
     release = answer.release
-    if answer.none or (release and compare_versions(release.version, current) <= 0):
+    if answer.none or (release and not newer_release(release.version)):
         say('No release is published yet.' if answer.none else 'The newest release is %s.' % release.tag)
         say('@step update The launcher is up to date: version %s is the newest.' % current)
         return None
@@ -365,6 +413,145 @@ def update(exe, cancelled=lambda: False, say=lambda line: print(line, flush=True
     say('Version %s is in %s.' % (release.version, exe))
     say('@launcher-updated ' + release.version)
     return release.version
+
+
+def github(path):
+    """GitHub's answer about this repository (the API's /repos/<it>/<path>), as JSON. UpdateError when it cannot
+    be asked, or says why not. ($TTT2_LAUNCHER_GITHUB is asked instead when set: tests.)"""
+    url = (os.environ.get('TTT2_LAUNCHER_GITHUB') or 'https://api.github.com') + '/repos/' + REPOSITORY + '/' + path
+    request = urllib.request.Request(url, headers={'Accept': 'application/vnd.github+json', 'User-Agent': user_agent()})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        with error: body = error.read()
+        try:
+            message = str(json.loads(body).get('message', ''))
+        except (ValueError, AttributeError):
+            message = ''
+        if 'rate limit' in message.lower():
+            raise UpdateError('GitHub answers only so many questions from one network an hour: try again later.')
+        raise UpdateError('GitHub answered "%s".' % (message or error.code))
+    except (OSError, ValueError) as error:
+        raise UpdateError('GitHub cannot be reached: %s.' % reason(error))
+
+
+def archive_url(commit):
+    base = os.environ.get('TTT2_LAUNCHER_GITHUB')
+    return base + '/archive/%s.zip' % commit if base else 'https://codeload.github.com/%s/zip/%s' % (REPOSITORY, commit)
+
+
+def archive_files(data, commit):
+    """{path: bytes} of GitHub's ZIP of `commit`, as make_launcher_exe.py packs a checkout's: batch files with
+    Windows line ends. UpdateError when it is not this project at that commit."""
+    short = commit[:7]
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise UpdateError('What was downloaded for %s is not a ZIP archive.' % short)
+    files, top = {}, None
+    with archive:
+        # (GitHub names the commit in the archive's comment.)
+        if archive.comment and archive.comment.decode('ascii', 'replace').strip() != commit:
+            raise UpdateError('What was downloaded for %s is another commit.' % short)
+        for info in archive.infolist():
+            if info.is_dir(): continue
+            folder, _, path = info.filename.partition('/')
+            top = top or folder
+            parts = path.split('/')
+            if folder != top or not path or '\\' in path or ':' in path or '..' in parts or '' in parts \
+                    or (info.external_attr >> 16) & 0o170000 == 0o120000:
+                raise UpdateError('What was downloaded for %s holds %s, which is not a plain file of the project.'
+                                  % (short, info.filename))
+            content = archive.read(info)
+            # cmd.exe can miss a batch file's labels when its lines end in LF only.
+            if path.lower().endswith(('.cmd', '.bat')): content = content.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+            files[path] = content
+    for needed in ('launcher/windows/main.py', 'launcher/windows/self_update.py', 'Start Ultimate Launcher.cmd',
+                   'launcher/builder/CMakeLists.txt'):
+        if needed not in files: raise UpdateError('What was downloaded for %s is not this project: it lacks %s.'
+                                                  % (short, needed))
+    return files
+
+
+def write_file(file, data):
+    """`data` in `file`, whole or not at all."""
+    file.parent.mkdir(parents=True, exist_ok=True)
+    part = file.with_name(file.name + '.part')
+    part.write_bytes(data)
+    os.replace(part, file)
+
+
+def install_files(root, files):
+    """`files` in place of the ones in the stamp (STAMP), as entry.cpp unpacks its own: files only those had are
+    deleted, nothing else (local/, the builds, the generated code) is touched. The stamp keeps the .exe's SHA-256:
+    the .exe then opens these as they are, instead of unpacking its own over them. Until all are in place it
+    names no .exe's files: one stopped half-way is unpacked again from the .exe when it is next started."""
+    root, stamp = Path(root), Path(root) / STAMP
+    lines = stamp.read_text(encoding='utf-8').splitlines()
+    digest, old = lines[0], [line for line in lines[1:] if line]
+    write_file(stamp, ('updating\n' + ''.join(path + '\n' for path in sorted(set(old) | set(files)))).encode())
+    for path, data in files.items():
+        file = root / path
+        try:
+            if file.is_file() and file.read_bytes() == data: continue
+        except OSError:
+            pass
+        write_file(file, data)
+    for path in set(old) - set(files):
+        if '..' in path.split('/'): continue
+        with contextlib.suppress(OSError): (root / path).unlink()
+    write_file(stamp, (digest + '\n' + ''.join(path + '\n' for path in sorted(files))).encode())
+
+
+def update_files(root, branch, cancelled=lambda: False, say=lambda line: print(line, flush=True)):
+    """Updates a test build's files (unpacked from its .exe into `root`) to the newest commit of its branch on
+    GitHub. That commit, or None when these are the newest. UpdateError says why it cannot; Cancelled when
+    cancelled (before anything is replaced)."""
+    root = Path(root)
+    current = build_commit(root)
+    if not current or not (root / STAMP).is_file():
+        raise UpdateError('These files were not unpacked from the launcher .exe: they cannot be updated in place.')
+    say('@step update Looking for newer changes on ' + branch)
+    quoted = urllib.parse.quote(branch, safe='')
+    try:
+        compare = github('compare/%s...%s' % (current, quoted))
+    except UpdateError as error:
+        if 'Not Found' not in str(error): raise
+        raise UpdateError('GitHub has no branch %s with this build\'s commit (%s) any more: download the newest '
+                          'release\'s launcher instead.' % (branch, current[:7]))
+    ahead = compare.get('ahead_by') if isinstance(compare, dict) else None
+    if not isinstance(ahead, int): raise UpdateError("GitHub's answer about %s is not readable." % branch)
+    if not ahead:
+        say('@step update The launcher is up to date: %s has nothing newer than %s.' % (branch, current[:7]))
+        return None
+    head = github('branches/' + quoted).get('commit', {}).get('sha', '')
+    if not re.fullmatch(r'[0-9a-f]{40}', head): raise UpdateError("GitHub's answer names no commit of %s." % branch)
+    url = archive_url(head)
+    if not os.environ.get('TTT2_LAUNCHER_GITHUB') and not url.startswith('https://'):
+        raise UpdateError('%s is not offered over HTTPS.' % head[:7])
+    say('@step update Downloading %d change%s of %s' % (ahead, '' if ahead == 1 else 's', branch))
+    file = root / 'local/launcher-update.zip'
+    try:
+        download(Release(version='', tag='', page='', asset='', url=url), file, cancelled, say)
+        data = file.read_bytes()
+    except (OSError, ValueError) as error:
+        raise UpdateError('%s cannot be downloaded: %s.' % (head[:7], reason(error)))
+    finally:
+        with contextlib.suppress(OSError): file.unlink()
+    files = archive_files(data, head)
+    files[BUILD_COMMIT] = (head + '\n').encode()
+    files[BUILD_BRANCH] = (branch + '\n').encode()
+    if cancelled(): raise Cancelled()
+    say('@step update Putting %s in place' % head[:7])
+    try:
+        install_files(root, files)
+    except OSError as error:
+        raise UpdateError('The new files cannot be put in place (%s): start the launcher again, it is as it was.'
+                          % reason(error))
+    say('The launcher\'s files are %s of %s.' % (head[:7], branch))
+    say('@launcher-updated ' + head[:7])
+    return head
 
 
 def open_updated(exe):

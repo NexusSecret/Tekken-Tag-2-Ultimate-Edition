@@ -82,6 +82,19 @@ class LauncherBackend(unittest.TestCase):
         from backend import worker
         with mock.patch.dict(os.environ, {'TTT2_LAUNCHER_EXE': ''}), self.assertRaisesRegex(ValueError, 'release .exe'):
             worker(self.settings, 'launcher', [])
+        with mock.patch.dict(os.environ, {'TTT2_LAUNCHER_EXE': ''}), self.assertRaisesRegex(ValueError, 'test build'):
+            worker(self.settings, 'files', [])
+    def test_failure_says_what_failed(self):
+        from backend import failure
+        ctest = ['94% tests passed, 1 tests failed out of 17', '', 'The following tests FAILED:',
+                 '\t 12 - noctis_assault_test (Not Run)', '\t 13 - title_test (Failed)', 'Errors while running CTest']
+        self.assertEqual(failure(ctest), 'Failed checks: noctis_assault_test (Not Run), title_test.')
+        ninja = ['[377/380] Building CXX object practice.cpp.obj', 'FAILED: [code=1] practice.cpp.obj',
+                 "C:/TTT2/runtime/src/title/practice.cpp:158:44: error: use of undeclared identifier 'memmem'",
+                 '1 error generated.']
+        self.assertEqual(failure(ninja), "Build error: C:/TTT2/runtime/src/title/practice.cpp:158:44: error: use of "
+                                         "undeclared identifier 'memmem'")
+        self.assertEqual(failure(['Configure failed']), '')
 
 class T8Extraction(unittest.TestCase):
     def extract(self, names, complete=True):

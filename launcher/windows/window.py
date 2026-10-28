@@ -30,7 +30,8 @@ NOTE = ('The Wii U game as a native Windows program, built on this PC from your 
 RESOLUTIONS = [('auto', 'Automatic'), ('1280x720', '1280 × 720'), ('1920x1080', '1920 × 1080'),
                ('2560x1440', '2560 × 1440'), ('3840x2160', '3840 × 2160'), ('5120x2880', '5120 × 2880')]
 TASK_TITLES = dict(setup='Setting up the game', build='Building the game', install='Installing the game',
-                   update='Updating the installed game', upgrade='Updating the game', launcher='Updating the launcher')
+                   update='Updating the installed game', upgrade='Updating the game', launcher='Updating the launcher',
+                   files='Updating the launcher')
 FOLDERS = [('source', 'Wii U archive', 'Your European Wii U .wua with update v16', False),
            ('title', 'Extracted Wii U title', 'For development imports, instead of an installed game', True),
            ('install', 'Installation folder', 'Where Set Up Game installs the game', True),
@@ -67,14 +68,19 @@ class Window:
             try: self.root.iconbitmap(default=str(self.exe))
             except tk.TclError: pass
         self.version = self_update.version()
+        # What a game built from these files is from (the version; a test build's commit too).
+        self.files_id = self_update.files_id()
         self.events = queue.Queue()
         self.task = None            # the task running, or ended and shown
         self.game = None            # the game, when started from here
         self.status, self.status_error, self.status_loading, self.status_time = None, '', False, 0.0
         self.owned, self.owned_state = None, 'unknown'
         self.release = dict(newer=None, checking=False, time=time.monotonic())
-        # What main has beyond this build (launcher.py main), when its commit is known.
+        # What main has beyond this build (launcher.py main), when its commit is known: a test build's
+        # own branch instead, whose newer commits update these files (Update, self_update.update_files).
         self.commit, self.main_news, self.main_checking = self_update.build_commit(), None, False
+        self.branch = self_update.test_branch() if self.exe else None
+        self.news_branch = self.branch or 'main'
         self.dlc_open, self.picking, self.page = False, None, 'main'
         self.root.report_callback_exception = self.callback_failed
         self.build_header()
@@ -122,7 +128,7 @@ class Window:
         self.refresh_button = L.button(bar, icon='refresh', kind='flat', command=self.check_again, tip='Check again')
         self.refresh_button.pack(side='right', padx=(0, px(8)))
         self.update_button = L.button(bar, icon='update', kind='flat', command=self.update_launcher,
-                                      tip='Update the launcher (this is version %s)' % self.version)
+                                      tip=self.update_tip())
         if self.exe: self.update_button.pack(side='right', padx=(0, px(2)))
 
     # ---------------------------------------------------------------- the main page
@@ -208,11 +214,11 @@ class Window:
                       'a folder. It downloads what it needs, builds the game on this PC from your copy and installs it: '
                       'about 30 GB, and a while. Your archive is kept.')
         game_files = installed_by(self.settings)
-        update = bool(installed and game_files and game_files != self.version)
+        update = bool(installed and game_files and game_files != self.files_id)
         if update:
             self.note(card, 'warning', 'An update of the game is ready (Ultimate Launcher %s; the game is from %s). '
-                      'Update builds it again on this PC from your game: a few minutes.' % (self.version, game_files),
-                      WARN)
+                      'Update builds it again on this PC from your game: a few minutes.'
+                      % (self_update.shown_id(self.files_id), self_update.shown_id(game_files)), WARN)
         buttons = L.frame(card)
         buttons.pack(fill='x', pady=(px(16), 0))
         if installed:
@@ -397,7 +403,8 @@ class Window:
         fresh = [n['display'] for n in self.main_news['new']] if self.main_news else []
         if fresh:
             names = fresh[0] if len(fresh) == 1 else ', '.join(fresh[:-1]) + ' and ' + fresh[-1]
-            self.note(card, 'info', 'Main adds %s: they come with the next release.' % names)
+            self.note(card, 'info', ('%s adds %s: Update the launcher to get them.' % (self.branch, names)) if self.branch
+                      else 'Main adds %s: they come with the next release.' % names)
         for game in ('tekken7', 'tekken8'):
             tk.Frame(card, bg=CARD_LINE, height=1).pack(fill='x', pady=(px(18), px(16)))
             self.show_game_characters(card, game)
@@ -516,7 +523,9 @@ class Window:
         if f.get('stand_in'):
             return 'Heihachi\'s moves', 'neutral', 'They fight with Heihachi\'s moves until their own can be saved.'
         if self.main_news and f['name'] in self.main_news['fighters'] and self.added(f):
-            return 'Newer on main', 'neutral', 'Main has an update for them: it comes with the next release.'
+            return 'Newer on ' + self.news_branch, 'neutral', (
+                '%s has an update for them: Update the launcher, then them.' % self.branch if self.branch else
+                'Main has an update for them: it comes with the next release.')
         if f['installed']: return 'Added', 'ok', None
         if f['dlc'] and owned is not None: return ('Owned' if owned else 'Not owned'), None, None
         return None
@@ -592,38 +601,44 @@ class Window:
     def show_notice(self):
         newer, news = self.release['newer'], self.main_news
         L = self.look
+        offered = bool(self.exe and newer) or bool(self.branch and news and news['ahead'])
         if (self.exe and newer) or (news and news['ahead']):
             if self.exe and newer:
                 self.notice_title.configure(text='Version %s of the launcher is out' % newer.version)
                 self.notice_detail.configure(text='You have %s. Update replaces this launcher with it and opens it.'
-                                             % self.version)
+                                             % ('a test build of it' if newer.version == self.version else self.version))
                 self.notice_link = newer.page
                 show_page = newer.page.startswith('https://') or (self_update.custom_releases() and newer.page)
                 self.notice_update.configure(state='disabled' if self.busy() else 'normal')
             else:
-                # Newer changes on main, before a release has them (as the Linux launcher says).
+                # Newer changes on main, before a release has them (as the Linux launcher says); a test
+                # build's on its branch, which Update gets.
                 count = news['ahead']
-                self.notice_title.configure(text='Newer changes are on main')
+                self.notice_title.configure(text='Newer changes are on ' + self.news_branch)
                 newest = (', the newest: \u201c%s\u201d' % news['changes'][0]) if news['changes'] else ''
-                self.notice_detail.configure(text='%d change%s since this version (%s, %s)%s. They come with the next '
-                                             'release.' % (count, '' if count == 1 else 's', self.version,
-                                                           self.commit[:7], newest))
+                self.notice_detail.configure(text='%d change%s since this %s (%s, %s)%s. %s' % (
+                    count, '' if count == 1 else 's', 'test build' if self.branch else 'version', self.version,
+                    self.commit[:7], newest, 'Update gets them without a new .exe.' if self.branch else
+                    'They come with the next release.'))
                 self.notice_link = news['page']
                 show_page = news['page'].startswith('https://') or bool(os.environ.get('TTT2_LAUNCHER_GITHUB'))
+                self.notice_update.configure(state='disabled' if self.busy() else 'normal')
             self.notice_update.pack_forget()
             self.notice_page.pack_forget()
-            if self.exe and newer: self.notice_update.pack(side='right')
+            if offered: self.notice_update.pack(side='right')
             if show_page: self.notice_page.pack(side='right', padx=(0, L.px(8)))
-            if self.exe and newer:
-                self.update_button.configure(image=L.icon('update', 16, NOTICE_ICON))
-                self.update_button.tooltip.text = ('Update the launcher to version %s (this is version %s)'
-                                                   % (newer.version, self.version))
             if not self.notice.winfo_ismapped(): self.notice.pack(fill='x', pady=(0, L.px(14)), before=self.banner)
         else:
             self.notice.pack_forget()
-        if not (self.exe and newer):
-            self.update_button.configure(image=L.icon('update', 16, TEXT))
-            self.update_button.tooltip.text = 'Update the launcher (this is version %s)' % self.version
+        self.update_button.configure(image=L.icon('update', 16, NOTICE_ICON if offered else TEXT))
+        self.update_button.tooltip.text = self.update_tip()
+
+    def update_tip(self):
+        newer = self.release['newer'] if self.exe else None
+        if newer: return 'Update the launcher to version %s (this is version %s)' % (newer.version, self.version)
+        if self.branch: return 'Update the launcher from %s (this is %s, %s)' % (self.branch, self.version,
+                                                                                  (self.commit or '')[:7])
+        return 'Update the launcher (this is version %s)' % self.version
 
     def check_release(self):
         if not self.exe or self.release['checking']: return
@@ -646,8 +661,7 @@ class Window:
         # (A newer release without its .exe yet is not offered.)
         if answer.none: self.release['newer'] = None
         elif answer.release:
-            newer = self_update.compare_versions(answer.release.version, self.version) > 0
-            self.release['newer'] = answer.release if newer else None
+            self.release['newer'] = answer.release if self_update.newer_release(answer.release.version) else None
         self.show_notice()
 
     def open_release_page(self):
@@ -658,7 +672,8 @@ class Window:
         self.main_checking = True
         def ask():
             try:
-                answer = importer(self.settings, 'main', '--commit', self.commit, timeout=120)
+                answer = importer(self.settings, 'main', '--commit', self.commit,
+                                  *(('--branch', self.branch) if self.branch else ()), timeout=120)
             except Exception as error:
                 answer = {'error': str(error)}
             self.events.put(('main', answer))
@@ -667,7 +682,7 @@ class Window:
     def main_known(self, answer):
         self.main_checking = False
         # (Quietly: no notice when GitHub cannot be asked now, or does not know this build.)
-        if 'error' in answer: return print('Ultimate Launcher: main:', answer['error'], flush=True)
+        if 'error' in answer: return print('Ultimate Launcher: %s:' % self.news_branch, answer['error'], flush=True)
         self.main_news = answer
         self.show_notice()
         self.show_characters()
@@ -678,7 +693,8 @@ class Window:
         if why:
             return self.error('The launcher cannot update itself: its folder, %s, cannot be written to (%s). Move it to '
                               'a folder of yours, then update it.' % (self.exe.parent, why))
-        self.start('launcher')
+        # (A newer release first; else a test build's newer files on its branch.)
+        self.start('files' if self.branch and not self.release['newer'] else 'launcher')
 
     # ---------------------------------------------------------------- tasks
 
@@ -730,7 +746,7 @@ class Window:
     def start(self, action, names=()):
         try:
             if self.busy(): raise ValueError('Another task is running: wait for it to end.')
-            if action not in ('launcher', 'import', 'remove') and self.game and self.game.poll() is None:
+            if action not in ('launcher', 'files', 'import', 'remove') and self.game and self.game.poll() is None:
                 raise ValueError('Close the game before building or installing it.')
             if action == 'setup':
                 from setup_game import validate_setup_paths
@@ -769,7 +785,8 @@ class Window:
         self.task_progress.configure(mode='indeterminate')
         self.task_progress.pack(fill='x', pady=(self.look.px(10), 0), before=self.details_button)
         self.task_progress.start(12)
-        self.task_button.configure(text='Cancel', state='normal' if action in ('import', 'remove', 'launcher') else 'disabled')
+        self.task_button.configure(text='Cancel', state='normal' if action in ('import', 'remove', 'launcher', 'files')
+                                   else 'disabled')
         if not self.task_panel.winfo_ismapped(): self.task_panel.pack(side='bottom', fill='x', before=self.body)
         self.show_all()
         def collect():
@@ -812,7 +829,8 @@ class Window:
         ok = code == 0
         action, names = task['action'], task['names']
         shown = ', '.join(self.display(n) for n in names) if len(names) < 3 else '%d characters' % len(names)
-        if action == 'launcher' and ok and task['updated']:
+        mine = action in ('launcher', 'files')     # (the launcher's own update)
+        if mine and ok and task['updated']:
             try:
                 self_update.open_updated(self.exe)
                 self.root.destroy()
@@ -821,18 +839,18 @@ class Window:
                 title, detail, ok = ('Updated to %s, but it cannot be opened' % task['updated'],
                                      self_update.reason(error) + '. Start the launcher again.', False)
         elif code == 130:
-            title, detail = ('Update cancelled' if action == 'launcher' else 'Cancelled'), (
-                'The launcher is as it was.' if action == 'launcher' else 'Completed extraction data is kept.')
+            title, detail = ('Update cancelled' if mine else 'Cancelled'), (
+                'The launcher is as it was.' if mine else 'Completed extraction data is kept.')
         elif ok:
             title = {'import': ('Updated ' if task['updating'] else 'Added ') + shown, 'remove': 'Removed ' + shown,
                      'setup': 'The game is set up', 'build': 'The game is built', 'install': 'The game is installed',
                      'update': 'The installed game is updated', 'upgrade': 'The game is updated',
-                     'launcher': 'The launcher is up to date'}[action]
-            detail = task['step'] if action == 'launcher' else 'Click Play to start it.' if action in (
+                     'launcher': 'The launcher is up to date', 'files': 'The launcher is up to date'}[action]
+            detail = task['step'] if mine else 'Click Play to start it.' if action in (
                 'setup', 'update', 'upgrade', 'install') else ''
         else:
             title = {'import': 'Could not add ' + shown, 'remove': 'Could not remove ' + shown,
-                     'launcher': 'Update failed'}.get(action, TASK_TITLES[action] + ' failed')
+                     'launcher': 'Update failed', 'files': 'Update failed'}.get(action, TASK_TITLES[action] + ' failed')
             detail = task['error'] or 'See Details, or Open Log to send it for help.'
         self.task_title.configure(text=title, fg=TEXT if ok or code == 130 else BAD)
         self.task_detail.configure(text=detail)
@@ -847,6 +865,7 @@ class Window:
         for key, var in self.folder_vars.items(): var.set(self.settings.values.get(key, ''))
         if action == 'launcher':
             self.release['newer'] = None if ok else self.release['newer']
+        if action == 'files' and ok: self.check_main()
         self.refresh()
         # A success says so for a while; a failure stays until closed.
         if ok:

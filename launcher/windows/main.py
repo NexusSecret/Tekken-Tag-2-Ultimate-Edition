@@ -14,7 +14,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--build-dir', type=Path)
     parser.add_argument('--config', type=Path)
-    parser.add_argument('--worker', choices=('setup', 'build', 'install', 'update', 'upgrade', 'import', 'remove', 'launcher'))
+    parser.add_argument('--worker', choices=('setup', 'build', 'install', 'update', 'upgrade', 'import', 'remove',
+                                                 'launcher', 'files'))
     parser.add_argument('--cancel-file', type=Path)
     parser.add_argument('--ui-smoke-test', type=Path)
     parser.add_argument('--check', action='store_true')
@@ -23,8 +24,8 @@ def main():
     settings = Settings(args.build_dir, args.config)
     if args.worker:
         cancelled = lambda: bool(args.cancel_file and args.cancel_file.exists())
-        # (The launcher's update stops only where it can: never half-way through replacing the .exe.)
-        if args.cancel_file and args.worker != 'launcher':
+        # (The launcher's update stops only where it can: never half-way through replacing the .exe or its files.)
+        if args.cancel_file and args.worker not in ('launcher', 'files'):
             def watch_cancel():
                 import _thread
                 while not args.cancel_file.exists():

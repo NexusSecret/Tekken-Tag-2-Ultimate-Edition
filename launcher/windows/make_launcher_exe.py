@@ -11,7 +11,8 @@ for a --stub, which is built already). Nothing of the game is in it: the game is
 on the player's PC from their own .wua. On the player's PC the .exe keeps the
 files in %LOCALAPPDATA%\\TTT2Ultimate\\launcher, opens the launcher from there,
 and that launcher updates the .exe from this repository's releases
-(self_update.py).
+(self_update.py). One made on a branch other than main is a test build: its
+launcher updates its files from that branch's newer commits instead.
 
 --stub EXE      entry.cpp as CMake built it for Windows (build-windows-*/ttt2-launcher.exe)
 --cxx COMPILER  else it is compiled here: with x86_64-w64-mingw32-g++ by default,
@@ -36,7 +37,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(HERE))
-from self_update import BUILD_COMMIT, MAGIC, TRAILER, is_launcher_exe, version  # noqa: E402
+from self_update import BUILD_BRANCH, BUILD_COMMIT, MAGIC, TRAILER, is_launcher_exe, version  # noqa: E402
 
 ICON = REPO / 'launcher/app/io.github.petexy.TekkenTag2UltimateEdition.svg'
 ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
@@ -184,8 +185,11 @@ def main():
     output = args.output.resolve()
     if not output.parent.is_dir(): die('%s is not a folder' % output.parent)
     files = tracked(args.allow_dirty)
-    # (Its build's commit: the launcher asks GitHub what main has beyond it, self_update.build_commit.)
+    # (Its build's commit: the launcher asks GitHub what main has beyond it, self_update.build_commit.
+    # Its branch: one other than main makes it a test build, whose files follow that branch, update_files.)
     files[BUILD_COMMIT] = git('rev-parse', 'HEAD').strip() + b'\n'
+    branch = git('rev-parse', '--abbrev-ref', 'HEAD').strip()
+    if branch != b'HEAD': files[BUILD_BRANCH] = branch + b'\n'
     for needed in ('launcher/windows/main.py', 'Start Ultimate Launcher.cmd', 'launcher/builder/CMakeLists.txt'):
         if needed not in files: die('the project lacks ' + needed)
     with tempfile.TemporaryDirectory(prefix='ttt2-launcher-exe-') as temporary:

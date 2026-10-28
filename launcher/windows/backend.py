@@ -1,7 +1,9 @@
 """Windows launcher backend; GTK/Linux code and character conversion stay shared."""
 from pathlib import Path
+import collections
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -98,30 +100,54 @@ class Settings:
                 *(['--remove'] if remove else [])]
 
 
+def failure(lines):
+    """What a failed command's last lines say went wrong, for the task panel: the checks ctest names as failed,
+    else the build's first error; '' when they say neither."""
+    for i, line in enumerate(lines):
+        if line.startswith('The following tests FAILED:'):
+            failed = []
+            for listed in lines[i + 1:]:
+                found = re.match(r'\s*\d+ - (\S+) \((.+)\)\s*$', listed)
+                if not found: break
+                failed.append(found.group(1) + ('' if found.group(2) == 'Failed' else ' (%s)' % found.group(2)))
+            if failed: return 'Failed check%s: %s.' % ('' if len(failed) == 1 else 's', ', '.join(failed))
+    for line in lines:
+        if ': error: ' in line or ': fatal error: ' in line:
+            text = line.strip()
+            return 'Build error: ' + (text if len(text) <= 300 else text[:297] + '...')
+    return ''
+
+
 def run_command(command, settings):
     print('Starting:', subprocess.list2cmdline(command), flush=True)
+    last = collections.deque(maxlen=400)
     with subprocess.Popen(command, cwd=settings.root, env=settings.environment(), stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)) as process:
         try:
             for line in process.stdout:
                 print(line, end='', flush=True)
+                last.append(line.rstrip('\n'))
                 if line.startswith('@folder '):
                     settings.values['install'] = line[8:].strip(); settings.save()
             result = process.wait()
         except BaseException:
             process.terminate(); process.wait(); raise
-    if result: raise RuntimeError('Task exited with code %d; see the log above.' % result)
+    if result:
+        # (Said in the task panel too: what a tester sends when it is all that is seen.)
+        if why := failure(list(last)): print('@error ' + why, flush=True)
+        raise RuntimeError('Task exited with code %d; see the log above.' % result)
 
 
 def built_by(settings):
-    """The launcher version whose files built the game in the build folder ('' when unknown)."""
+    """The launcher version whose files built the game in the build folder, with a test build's commit
+    (self_update.files_id; '' when unknown)."""
     file = settings.build / 'ttt2-launcher-version.txt'
     return file.read_text(encoding='utf-8').strip() if file.is_file() else ''
 
 
 def installed_by(settings):
-    """The launcher version whose files built the installed game ('' when unknown)."""
+    """The launcher version whose files built the installed game, as built_by ('' when unknown)."""
     file = settings.build / 'ttt2-installed-version.txt'
     return file.read_text(encoding='utf-8').strip() if file.is_file() and settings.installed() else ''
 
@@ -161,6 +187,12 @@ def worker(settings, action, names, cancelled=lambda: False):
         exe = self_update.running_exe()
         if not exe: raise ValueError('Only the release .exe updates itself, and this launcher was not opened from one.')
         self_update.update(exe, cancelled)
+    elif action == 'files':
+        import self_update
+        branch = self_update.test_branch(settings.root)
+        if not self_update.running_exe() or not branch:
+            raise ValueError('Only a test build\'s .exe updates its files from its branch, and this launcher is not one.')
+        self_update.update_files(settings.root, branch, cancelled)
     elif action in ('install', 'update'):
         run_command(settings.installer_command(action == 'update'), settings)
     elif action in ('import', 'remove'):
@@ -184,6 +216,7 @@ def worker(settings, action, names, cancelled=lambda: False):
     else: raise ValueError('Unknown task: ' + action)
     import self_update
     if action in ('setup', 'build', 'upgrade'):
-        (settings.build / 'ttt2-launcher-version.txt').write_text(self_update.version() + '\n', encoding='utf-8')
+        (settings.build / 'ttt2-launcher-version.txt').write_text(self_update.files_id(settings.root) + '\n',
+                                                                 encoding='utf-8')
     if action in ('setup', 'install', 'update', 'upgrade') and built_by(settings):
         (settings.build / 'ttt2-installed-version.txt').write_text(built_by(settings) + '\n', encoding='utf-8')

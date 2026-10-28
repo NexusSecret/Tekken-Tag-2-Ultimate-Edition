@@ -186,6 +186,17 @@ Cancel, leaves the `.exe` as it was. A game an older version built gets
 changes. The launcher also says when `main` has newer changes than its release,
 as the Linux launcher does (below).
 
+A test build (an `.exe` made on a branch other than `main`, for testers) follows
+its branch instead: when the branch has newer commits, the notice says so with
+**Update**, which downloads the newest commit's files from GitHub, puts them in
+place of the ones the `.exe` unpacked and opens the launcher again: a fix pushed
+to the branch reaches testers without a new `.exe`. A game built from older
+files then gets **Update** beside Play. One stopped half-way is unpacked again
+from the `.exe` when it is next started.
+
+When Set Up Game or Update fails, the task panel names the checks that failed or
+the build's first error; **Open Log** there opens the whole log.
+
 **Starting from a downloaded project ZIP (Windows 10/11, x64):**
 
 1. Download this branch as a ZIP and **Extract All** into a writable folder.
@@ -334,6 +345,8 @@ It is `launcher/windows/entry.cpp` compiled with MinGW-w64
 project's tracked files (nothing of the game) as a resource of the program, and
 its icon and version details (the icon needs `rsvg-convert`). `--stub` takes a
 launcher CMake built for Windows instead and appends the files to it (tests).
+Made on a branch other than `main`, it is a test build, which updates its files
+from that branch (above); a release is made on `main`.
 The files are a resource rather than data after the program because virus
 scanners' guesses take that for a dropper's payload less often; the `.exe` is
 not code-signed, so Windows Defender may still flag a new build by guess
