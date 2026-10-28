@@ -1595,6 +1595,7 @@ PPC_FUNC(sub_033D5064) { // record i of id
 // A record answered by an added fighter's records: k, its costume slot, or -1.
 int g_proxy_record = -1;   // a record that answers the proxy id meanwhile (see sub_044BE1EC)
 uint32_t g_proxy_id = 0;
+bool g_donor_ids = false;  // an added fighter's records answer its donor's id meanwhile (see sub_0726ABEC)
 #define RECORD_FIELD(name, value)                                                                                \
     PPC_FUNC(name##_orig);                                                                                       \
     PPC_FUNC(name) {                                                                                             \
@@ -1607,10 +1608,23 @@ uint32_t g_proxy_id = 0;
         }                                                                                                        \
         name##_orig(ctx, base);                                                                                  \
     }
-RECORD_FIELD(sub_033D50A8, g_proxy_record == static_cast<int>(ctx.r[3]) ? g_proxy_id : added.id) // its fighter
+RECORD_FIELD(sub_033D50A8, g_proxy_record == static_cast<int>(ctx.r[3]) ? g_proxy_id
+                           : g_donor_ids                                    ? added.donor
+                                                                            : added.id) // its fighter
 RECORD_FIELD(sub_033D50C8, costume)                                                              // its costume slot
 RECORD_FIELD(sub_033D50E8, added.row)                                                            // its motion row
 #undef RECORD_FIELD
+// A match's start in Arcade, VS and the like counts each fighter's plays (sub_0567356C: a saturating u16 counter)
+// in a table of 64 by select id (object +13924), the CPU's job queue right behind it (0x10856FCC: its workers, their
+// semaphore, the jobs pending). An added fighter's id (64 on) counted into the queue's fields; the 19th's (82) into
+// its semaphore's count, which woke the workers 65536 times with no job, the jobs pending fell below 0 and the match
+// waited for them forever after "Fight". Its donor's plays are counted instead.
+PPC_FUNC(sub_0726ABEC_orig);
+PPC_FUNC(sub_0726ABEC) {
+    g_donor_ids = true;
+    sub_0726ABEC_orig(ctx, base);
+    g_donor_ids = false;
+}
 // Its init callback (the fighters' one returns 1).
 PPC_FUNC(sub_033D5108_orig);
 PPC_FUNC(sub_033D5108) {
