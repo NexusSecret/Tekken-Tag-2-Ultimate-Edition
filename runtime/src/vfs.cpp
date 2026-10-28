@@ -60,9 +60,9 @@ struct Dir {
 };
 std::unordered_map<int32_t, File> g_files;
 
-// watch_entry_reads: the callback, and each archive's entries as {start,
+// watch_entry_reads: the callbacks, and each archive's entries as {start,
 // end, name hash} in its .bin, sorted.
-std::function<void(uint32_t)> g_entry_reader;
+std::vector<std::function<void(uint32_t)>> g_entry_readers;
 // TTT2_TRACE_ENTRIES=1: every archive entry the title reads, with the time.
 const bool g_trace_entries = std::getenv("TTT2_TRACE_ENTRIES") != nullptr;
 const auto g_trace_start = std::chrono::steady_clock::now();
@@ -306,7 +306,7 @@ std::vector<uint32_t> entries_read(const std::string& archive, uint64_t start, u
 
 void watch_entry_reads(std::function<void(uint32_t)> reader) {
     std::lock_guard lock(g_mutex);
-    g_entry_reader = std::move(reader);
+    g_entry_readers.push_back(std::move(reader));
 }
 
 bool set_archive_entries(const std::string& archive, const std::map<uint32_t, std::vector<uint8_t>>& stored) {
@@ -402,7 +402,7 @@ Status open_file_impl(std::string_view path, std::string_view mode, int32_t& han
 Status open_file(std::string_view path, std::string_view mode, int32_t& handle) {
     std::lock_guard lock(g_mutex);
     const Status status = open_file_impl(path, mode, handle);
-    if (status == kOk && (g_entry_reader || g_trace_entries)) {
+    if (status == kOk && (!g_entry_readers.empty() || g_trace_entries)) {
         const Resolved r = resolve(path);
         const std::string name = lower(r.relative);
         if (r.area == Area::kGame && name.size() > 4 && name.compare(name.size() - 4, 4, ".bin") == 0 &&
@@ -457,14 +457,14 @@ Status read_file(int32_t handle, void* buffer, uint64_t size, std::optional<uint
             transferred = read_underlying(file, file.position, want, buffer);
         }
     }
-    std::function<void(uint32_t)> reader;
+    std::vector<std::function<void(uint32_t)>> readers;
     std::vector<uint32_t> read_entries;
     {
         std::lock_guard lock(g_mutex);
         const auto it = g_files.find(handle);
         if (it != g_files.end()) it->second.position = file.position + transferred;
-        if ((g_entry_reader || g_trace_entries) && !file.archive_bin.empty() && transferred != 0) {
-            reader = g_entry_reader;
+        if ((!g_entry_readers.empty() || g_trace_entries) && !file.archive_bin.empty() && transferred != 0) {
+            readers = g_entry_readers;
             read_entries = entries_read(file.archive_bin, file.position, file.position + transferred);
         }
     }
@@ -473,7 +473,7 @@ Status read_file(int32_t handle, void* buffer, uint64_t size, std::optional<uint
             const double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_trace_start).count();
             std::fprintf(stderr, "entry: %8.3f %s %08x\n", t, file.archive_bin.c_str() + 12, hash);
         }
-        if (reader) reader(hash);
+        for (const auto& reader : readers) reader(hash);
     }
     return kOk;
 }

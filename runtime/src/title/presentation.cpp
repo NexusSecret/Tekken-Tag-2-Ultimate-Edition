@@ -66,16 +66,6 @@ std::array<uint8_t, 16> md5_of(const uint8_t* data, size_t size) {
     return md5;
 }
 
-void replace_texture(const ntp3::Texture& original, std::function<const std::vector<uint8_t>*()> contents) {
-    gpu::TextureReplacement r;
-    r.width = original.width;
-    r.height = original.height;
-    r.format = original.gx2_format();
-    r.md5 = md5_of(original.data.data(), original.level0_size());
-    r.contents = std::move(contents);
-    gpu::add_texture_replacement(std::move(r));
-}
-
 // ------------------------------------------------------------------ the controller
 
 std::atomic<host::Controller> g_controller{host::Controller::kOther};
@@ -490,6 +480,16 @@ void system_info_created(uint32_t info) {
 }
 
 std::optional<std::vector<uint8_t>> game_file(const char* archive, uint32_t hash) { return game_entry(archive, hash); }
+
+void replace_texture(const ntp3::Texture& original, std::function<const std::vector<uint8_t>*()> contents) {
+    gpu::TextureReplacement r;
+    r.width = original.width;
+    r.height = original.height;
+    r.format = original.gx2_format();
+    r.md5 = md5_of(original.data.data(), original.level0_size());
+    r.contents = std::move(contents);
+    gpu::add_texture_replacement(std::move(r));
+}
 
 void prepare_presentation() {
     const auto begin = std::chrono::steady_clock::now();

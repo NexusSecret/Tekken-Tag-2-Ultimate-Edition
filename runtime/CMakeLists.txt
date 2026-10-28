@@ -69,6 +69,7 @@ add_library(cafe_runtime OBJECT
     src/gx2/texture.cpp
     src/title/framedata.cpp
     src/title/input_delay.cpp
+    src/title/controllers.cpp
     src/title/practice.cpp
     src/title/presentation.cpp
     src/title/roster.cpp)
@@ -96,6 +97,7 @@ add_library(cafe_title STATIC
     src/title/draw.cpp
     src/title/font.cpp
     src/title/image.cpp
+    src/title/pictures.cpp
     src/title/text.cpp
     src/title/title_screen.cpp)
 target_include_directories(cafe_title PUBLIC src)

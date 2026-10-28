@@ -48,6 +48,11 @@ and shaders are translated to Vulkan as it runs.
   title screen's logo says "Ultimate Edition" where it said "Wii U
   Edition", in the same brush lettering. All of it is made by the port
   from the Wii U game's own files.
+- **Local multiplayer**: in VS Battle, Team Battle and Pair Play every
+  keyboard or gamepad that presses Start joins as a player of its own, up
+  to five, and the player entry screen pictures the keyboard, PlayStation,
+  Xbox-style or Nintendo controller each player holds, drawn in the game's
+  style. Everywhere else every device plays as the one player.
 - **Position reset in Practice**, as in Tekken 8: 3 and − (Select) pressed
   together put both fighters back where the stage put them; a hint at the
   bottom right of the screen says so, in the look of the game's own.
@@ -394,6 +399,17 @@ fights use them that way. In menus the bottom button (B, by default K on the
 keyboard) confirms and the right one goes back, except with a Nintendo
 controller, which confirms with its A as on the Wii U. The icons follow the
 last controller used (the keyboard counts as a neutral one).
+
+For one player, the keyboard and all gamepads control the game together,
+so any of them can be picked up at any time. VS Battle and Pair Play can be
+chosen once two devices are connected (the keyboard and a gamepad, or two
+gamepads). VS Battle, Team Battle and Pair Play start on the player entry
+screen ("Press the controller's +"):
+there each player presses Start (Enter on the keyboard) on their own
+device, the first one joining as the Wii U's GamePad and the others as Pro
+Controllers, and from then on each device plays only for its player, as
+on the console. Back in the menus every device controls the game together
+again.
 
 In Practice, 3 (left kick: by default K, or a gamepad's bottom button) and
 − (Select: Backspace) pressed together, in either order, put both fighters

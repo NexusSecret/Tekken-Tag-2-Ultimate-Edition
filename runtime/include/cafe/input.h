@@ -1,9 +1,11 @@
 #pragma once
 
-// Host-side GamePad state, set by the window/input layer and read by the
-// game through VPADRead.
+// Host-side controller states, set by the window/input layer and read by the
+// game: the GamePad's through VPADRead, the Pro Controllers' through KPAD.
 
+#include <array>
 #include <cstdint>
+#include <optional>
 
 namespace cafe::os {
 
@@ -29,6 +31,11 @@ struct GamepadState {
 };
 
 void set_gamepad_state(const GamepadState& state);
+
+// The Pro Controllers on KPAD's channels 0-3 (buttons by the GamePad's bits);
+// a channel without a state has none connected.
+constexpr int kProControllers = 4;
+void set_pro_controller_states(const std::array<std::optional<GamepadState>, kProControllers>& states);
 
 // - (Select) pressed together with another button, for a mode that gives the
 // chord a meaning of its own (title/practice.cpp: Practice's position reset).
