@@ -146,8 +146,10 @@ MOVESET = {
            for name in _SUPER_CANCELS_ON_CONTACT + _SUPER_CANCELS_WITHOUT_CONTACT},
     },
     'name': '[GEESE]',
-    # CD+2 (Hishou Nichirin Zan): Bound on the second hit only.
-    'bounds': {'My_623B2': True},
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds, and CD+2 (Hishou Nichirin
+    # Zan) on its second hit
+    'bounds': dict.fromkeys(('My_EX_FudohPAB_LK', 'My_FudohP_LK', 'My_lprplp03', 'My_rp00B', 'My_t_slkF2_RP',
+                             'My_623B2'), True),
     # f+1+2 airborne pickup: native float plus earlier neutral recovery.
     'air_reactions': {'My_WPF': (40, 'J8_jprk00')},
     'recovery_trim': {'My_WPF': 8},

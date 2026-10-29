@@ -92,9 +92,11 @@ MOVESET = {
     'hitboxes': {'Co_R_rp00L': (12, 13, 0xfe, 11),
                  'Co_R_lp00R': (12, 13, 0xfe, 11),
                  'Kt_Se_lp_LK': (0xfd, 0, 0xfd, 19)},
-    'bounds': {'Kt_6lk_lprpLK': True},
     'buffered_stance_transitions': {'Kt_rk00F': 'Kt_shoryu02'},
     'name': '[KUNIMITSU]',
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
+    'bounds': dict.fromkeys(('Kt_236RP', 'Kt_3lprp_RP', 'Kt_3lrp2', 'Kt_66rk_RP', 'Kt_6lk_lprpLK', 'Kt_s_tlplp',
+                             'Kt_t_slp00'), True),
     'drop_moves': r'^Kt_Direct$',
     'direct': [(r'^(ju|mk)_s', 'anim', ['kt_s%02d' % k for k in range(6)]),     # the donor's intros -> her
                (r'^ju_w', 'anim', ['kt_w%02d' % k for k in range(4)])],         # win poses
