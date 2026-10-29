@@ -99,6 +99,10 @@ MOVESET = {
     # recovered from the saved stance inputs: sen_RP=Sentai 2, sen_RK=Sentai 4,
     # kon_WK=Heaven's Wrath 3+4.
     'move_name_seeds': ('Zbr_sen_RP', 'Zbr_sen_RK', 'Zbr_sen_WP2', 'Zbr_kon_WK', 'Zbr_sen_WK', 'Zbr_sen_WK2'),
+    # TTT2 bounds (Tekken 8 has none, and its tornados do not become any): an air hit slams the opponent into the
+    # floor once per juggle (convert/move_overrides.py). d+2 Tecchuu-ate, f+4 Kamadhatu Splits
+    # Kick, the same kick out of a dash (Zbr_66RK: f,f+4 by the donor's dash rows; Tekken 8's after a Heat Dash),
+    # d/f+1,2's second hit (Zbr_3LPRP), 3+4, Sentai 4 and Heaven's Wrath 3+4; the others named none
     'bounds': {
         'Zbr_2RP': True,       # d+2
         'Zbr_6RK': True,       # f+4

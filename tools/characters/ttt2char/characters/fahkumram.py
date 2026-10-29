@@ -99,7 +99,9 @@ MOVESET = {
     'air_reactions': {'Nc_lp00B': 'J8_jprk00',
                       'Nc_66rklkrp': (23, 'Jn_mc03s')},
     'air_reaction_reference': 40,  # Jinpachi u+4, airborne reaction
-    'bounds': {'Nc_66rklp': True, 'Nc_3rplp': True, 'Nc_3lprk': False},
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds; d/f+1,4's second hit none
+    'bounds': {**dict.fromkeys(('Nc_2lp', 'Nc_2lrk', 'Nc_3rklklk', 'Nc_3rplp', 'Nc_66rklp', 'Nc_WK00F',
+                                'Nc_jplp00F'), True), 'Nc_3lprk': False},
     'name': '[FAHKUMRAM]',
     # Preserve Fahk's running 3 (ncss_mach) and d+4 (ncss_2rk), despite generic names.
     'own_moves': r'^(Co_runlk00|Co_t_srk00)$',
