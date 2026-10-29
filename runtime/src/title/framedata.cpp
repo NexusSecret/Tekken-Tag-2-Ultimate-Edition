@@ -245,9 +245,8 @@ struct Session {
     } top;
     std::vector<AttackLine> attack_lines;
     uint32_t body_hits[2][kBodySphereCount] = {}; // frames since a line crossed the sphere (from kAttackLinger + 1: none)
-    float panel_tops[2] = {};  // the sides' panels' tops as last shown (0: none)
-    bool history_shown = false; // and the input history's column
-    double panels_until = 0;   // and until when they show
+    bool history_shown = false; // the input history's column as last shown
+    double panels_until = 0;   // and until when it shows
 };
 Session g;
 
@@ -731,6 +730,7 @@ constexpr float kLabelPx = 12.5f, kValuePx = 13.5f; // text heights (the font's 
 // The hint line: the title's hints' height and size (Defensive Training's at
 // x 138, y 643 to 666), the panels above it.
 constexpr float kTipY = 654.5f, kTipIcon = 23, kTipButton = 19, kTipPx = 21, kTipSide = 138, kPanelsBottom = 634;
+constexpr float kAboveGauge = 8; // (and above a 2D fighter's gauge)
 constexpr float kTipSpacing = -1.0f; // added to each glyph's advance
 constexpr uint32_t kTipOutline = 0x000000B0;
 
@@ -842,7 +842,6 @@ void lay_out_side(Layout& l, int s, const Fighter now[2], float bottom) {
     const float x0 = s == 0 ? kMargin : gpu::overlay::kWidth - kMargin - kWidth, x1 = x0 + kWidth;
     const float lower_h = 4 * kRow + kPadTop + kPadBottom, upper_h = 6 * kRow + kPadTop + kPadBottom;
     const float lower_top = bottom - lower_h, upper_top = lower_top - kGap - upper_h;
-    g.panel_tops[s] = upper_top;
     l.panel(s, x0, upper_top, x1, lower_top - kGap);
     l.panel(s, x0, lower_top, x1, bottom);
     const float lx = x0 + kPadSide, rx = x1 - kPadSide;
@@ -1139,11 +1138,15 @@ void publish(uint8_t* base, const Fighter now[2]) {
     } else {
         start_over_hitboxes();
     }
-    g.panel_tops[0] = g.panel_tops[1] = 0;
     g.history_shown = history;
     g.panels_until = seconds() + 0.25;
-    if (g.settings[kPanels] && g.settings[kPanel1P]) lay_out_side(l, 0, now, bottom);
-    if (g.settings[kPanels] && g.settings[kPanel2P]) lay_out_side(l, 1, now, bottom);
+    // A side's above its 2D fighter's gauge (title/gauge.cpp), when that shows.
+    const auto side_bottom = [&](int s) {
+        const float top = gauge::top(s);
+        return top ? std::min(bottom, top - kAboveGauge) : bottom;
+    };
+    if (g.settings[kPanels] && g.settings[kPanel1P]) lay_out_side(l, 0, now, side_bottom(0));
+    if (g.settings[kPanels] && g.settings[kPanel2P]) lay_out_side(l, 1, now, side_bottom(1));
     if (history) lay_out_history(l);
     // Until the next fighters' frame, and a little longer: frames can come
     // late; once they stop (the pause menu, the round left) the panels go.
@@ -1209,8 +1212,6 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
 void reset() { start_over(); }
 
 uint32_t setting(Setting s) { return g.settings[s]; }
-
-float panels_top(int side) { return seconds() < g.panels_until ? g.panel_tops[side & 1] : 0; }
 
 float history_right() { return seconds() < g.panels_until && g.history_shown ? kHistoryX1 : 0; }
 

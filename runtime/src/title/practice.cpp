@@ -607,6 +607,7 @@ PPC_FUNC(sub_0726DF8C) {
         title::framedata::reset();
     }
     sub_0726DF8C_orig(ctx, base);
+    title::gauge::battle_frame(base);
 }
 
 

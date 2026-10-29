@@ -224,8 +224,9 @@ def revision(d):
     return REVISION + vars(d).get('REVISION', 0)
 
 
-def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=()):
+def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), sound_extra=()):
     """voice_extra: the se_Chr tones of the shouts past the donor's (the port appends them to the voice list);
+    sound_extra: the se_Chr tones of its sound effects (the port appends them to its item sounds: convert/sounds.py);
     weapons: weapons.of_skeleton's [(k, parent bone, [(point number, slot)], summon)] (the port poses them):
     k:parent:points[:summon], a point `n` hitting as slot n, else `n>slot`."""
     def item(k, parent, points, summon):
@@ -237,6 +238,7 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=()):
                revision(d))
             + ('stand_in = %s\n' % d.DONOR if getattr(d, 'WITHOUT_OWN_MOVESET', False) else '')
             + ('voice_extra = %s\n' % ' '.join(map(str, voice_extra)) if voice_extra else '')
+            + ('sound_extra = %s\n' % ' '.join(map(str, sound_extra)) if sound_extra else '')
             + ('weapons = %s\n' % ' '.join(item(*w) for w in weapons) if weapons else '')
             + ('outfits = %s\n' % ' '.join(outfits) if outfits else '')
             + (gauge.ini_line(d) + '\n' if gauge.ini_line(d) else ''))
@@ -379,7 +381,7 @@ def target_of(folder, d):
     return real
 
 
-def write(folder, d, files, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=()):
+def write(folder, d, files, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=(), sound_extra=()):
     """Writes the pack <folder>/<code>/ from files {suffix or file name: bytes} (a suffix starts with '.': the file
     is <code><suffix>); returns its path. The pack is made whole in a hidden folder beside its place first
     (.<code>.part, character.ini last), which then takes the place of the fighter's earlier pack: that one goes
@@ -392,7 +394,8 @@ def write(folder, d, files, slot, chr_tones=0, voice_extra=(), weapons=(), outfi
     part, old = _working(real)
     out = {(d.CODE + name if name.startswith('.') else name): data for name, data in files.items()}
     out.pop('character.ini', None)
-    out['character.ini'] = character_ini(d, slot, chr_tones, voice_extra, weapons, outfits).encode('utf-8')
+    out['character.ini'] = character_ini(d, slot, chr_tones, voice_extra, weapons, outfits,
+                                         sound_extra).encode('utf-8')
     os.makedirs(os.path.dirname(real), exist_ok=True)
     for path in (part, old):                        # (a killed write's, or one that could not be deleted)
         try:

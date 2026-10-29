@@ -1334,7 +1334,8 @@ the pack's `gauge/` (gauge.ini over gauge.nut), and the runtime shows the
 clips Tekken 7's HUD code would for the gauge (a stock fills, every stock
 full, the gauge spent) on the overlay's HUD layer, the slots' bars moved
 along their masks, while the fighters' round phase (player +2048) is past
-its intro. The pictures shown only in the glow and lightning clips (Eliza's
+its intro; Practice's frame data panels go above it (its top: where its
+resting pictures' texels cover at least half). The pictures shown only in the glow and lightning clips (Eliza's
 bats and flares) are kept at half size, the sheet as BC3.
 Geese's gauge holds three stocks and has Tekken 7's MAX mode: 1+2+3 spends
 a stock and starts a timer (player +0xcd8: at most 720 frames, one less a
@@ -1344,7 +1345,60 @@ gauge; the port's ids are requirement 192 and property 0x8224. His HUD is
 his own movie's (SW_UI_HUD_Rage_MRY, played as Tekken 7's SwfHUDMRYGauge
 does): a power bar for the stock being filled with the stock count beside
 it (the count's clip baked once per number), MAXIMUM when every stock is
-full, the MAX timer's bar with MAXMODE while it runs.
+full, the MAX timer's bar with MAXMODE while it runs; he is drawn in a
+pulsing light blue (his colour multiplied, as the flash) until it ends.
+A super stops time for the opponent as it starts (Tekken 7's 0x828c, slow
+motion: its value's low 16 bits the frames, with 0x828d, its fighter
+immune; Double Reppuken 70 frames from its 8th, its hit at the 80th): the
+importer writes it as property 0x8225, and the runtime skips the
+opponent's own frame (`sub_0414FA10`, r3 the fighter: its move, animation
+and inputs) and puts it back where it stopped after each battle frame (the
+pushing and knockback run outside it), until the frames are over or a
+fighter is hit. TTT2 has no hit stop to borrow (the move frames run on
+through a hit), and without the stop the opponent recovered long before
+the super's hit (1,2,1,2 into Double Reppuken no combo). Tekken 7 shows the
+attacker meanwhile through camera animations of the fighter's own (0x8439
+/ 0x843a); the port writes a close-up of its own into the render camera
+after each battle frame (eye, target, up, view and view-projection: the
+title draws from them), from the side the camera was on, turning and
+closing in, and lets the title's camera take over when the stop ends.
+A Tekken 7 projectile hits a fighter once: Raging Storm's, allowed 10
+hits, deals its 43 once, while TTT2's deals its hits on every frame it
+touches the opponent (six of them, 140 and more). A projectile that hits
+more turns into the next on its hit (a cancel row testing 784, the
+projectile hit, with option 0x40; 787 blocked): Double Reppuken's and
+Messatsu Gou Hadou's five of 13 and 20. TTT2's projectiles have such
+cancel lists but no test for their own hit, so a 2D fighter's projectile
+gets the chain's length as its hits (they come on consecutive frames).
+
+The 2D fighters' sound effects (`convert/sounds.py`): Tekken 7 plays a move's
+sound with 0x84c4 / 0x84c6 = bank << 24 | n, bank 15 being the common sound
+manager's list (`BP_TekkenCommonSoundManager` BattleSysTones: 57
+`mrx_hadou01_shot`, 71 `SE_battle_spgauge_start` an EX move's start, 72
+`SE_battle_spcombo_start` a super's, 404 `se_mry_rep_shot`, ...), whose
+events are in AkBankBattle.bnk or the fighter's own voice bank (Geese's);
+a projectile's hit sound is its missile blueprint's (the AkAudioEvent it
+names ending `_hit` / `_hit_flame`). The importer appends those the kept
+moves use to the fighter's se_Chr (copies of the donor's item sound tone,
+`itm_lar_03`; character.ini `sound_extra`), and the moves play them as item
+sounds: 0x82f9 = 12 << 24 | 1 << 12 | n (kind 1: the player's own list,
+which the runtime makes the donor's item sounds and then these), as does a
+projectile row's hit sound (field 16). They play alongside the voice.
+A projectile's look turns to the way the projectile flies (its place from
+frame to frame; Tekken 7 turns its missile so). An effect that starts with
+a projectile thrown up or down (within 150 ms of it: the air fireball's
+flash, which Tekken 7 sets on the throwing hand) turns whole about its
+fighter's left to the projectile's path (atan2 of the row's up and forward
+speeds, -52 degrees for Akuma's): left level, its orbs and wind went
+straight up or straight back. Such a projectile ends where it meets the
+floor (its frames left set to 1 once its lowest point is at the floor's
+height, as Tekken 7's missiles end there; TTT2's flew on through it). An air
+move hangs at its height until it has thrown its projectile, then falls on
+(Tekken 7's air fireball: thrown right after the take-off it comes out just
+above the floor). Falling through its startup, one started late in the jump
+landed well before its throw, which then never came (the touchdown goes to
+the move's ground_fall frame) or came from the floor a sixth of a second
+later.
 
 ## The launcher
 

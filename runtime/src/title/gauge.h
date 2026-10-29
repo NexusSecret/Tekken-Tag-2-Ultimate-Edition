@@ -3,7 +3,8 @@
 // The gauge of an added Tekken 7 2D fighter (Akuma's Super Combo gauge,
 // Eliza's): what its EX moves, supers and cancels cost, filled as it deals
 // and takes damage, shown at the bottom of the screen with Tekken 7's own
-// pictures, the fighter lit up yellow as it spends it. See gauge.cpp.
+// pictures, the fighter lit up yellow as it spends it (Geese light blue in
+// his MAX mode). See gauge.cpp.
 
 #include <cstdint>
 #include <filesystem>
@@ -24,6 +25,7 @@ constexpr uint32_t kAdd = 0x8220;   // the gauge += value (signed; a cost is neg
 constexpr uint32_t kNoGain = 0x8222; // value 1: the move builds no gauge for its attacks
 constexpr uint32_t kFlash = 0x8223;  // the fighter lights up (an EX move, a cancel)
 constexpr uint32_t kMaxAdd = 0x8224; // the MAX mode's timer += value frames (signed; at most 720)
+constexpr uint32_t kStop = 0x8225;   // the opponent stops for value frames (a super's start)
 
 // character.ini's `gauge` line: the most it holds, a stock, then the
 // gains in percent of the damage: a blocked attack's (the defender's, the
@@ -51,8 +53,17 @@ void situation(uint32_t kind);
 // After the fighters' frame: the gains, the flashes' time, the HUD.
 void fighters_frame(uint8_t* base, const uint32_t fighters[2]);
 
-// The colour the title draws `fighter` in while it flashes (a guest
-// address of four floats, the fighter's own times yellow), else 0.
+// The colour the title draws `fighter` in while it flashes or its MAX mode
+// runs (a guest address of four floats, the fighter's own times yellow or
+// light blue), else 0.
 uint32_t colour(uint32_t fighter);
+
+// The top of a side's gauge (0 left, 1 right) on the TV image while it
+// shows, else 0 (title/framedata.cpp's panels go above it).
+float top(int side);
+
+// After the battle's frame (sub_0726DF8C): a stopped fighter kept where
+// it stopped.
+void battle_frame(uint8_t* base);
 
 } // namespace cafe::title::gauge

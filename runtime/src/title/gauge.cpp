@@ -49,6 +49,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -72,18 +73,131 @@ constexpr uint32_t kPhase = 2048; // the fighter's round: 0 before it (its intro
 // then fading.
 constexpr int kFlashFrames = 18, kFlashHold = 4;
 constexpr float kYellow[3] = {2.4f, 2.0f, 0.35f};
+// Geese's MAX mode: a light blue tint, pulsing slowly while it runs.
+constexpr float kLightBlue[3] = {0.75f, 1.15f, 1.85f};
+constexpr int kPulseFrames = 60;
 
 constexpr float kScale = gpu::overlay::kWidth / 1920.0f; // Tekken 7's HUD is 1920 x 1080
 // Geese's MAX mode (Tekken 7's player +0xcd8, in hundredths of a frame): at
 // most 720 frames (0x1434df508, set at start-up), one less every frame
 // (0x14078e1e4); the fighter builds no gauge while it runs (0x140714138).
 constexpr int32_t kMaxTimer = 720;
+// A super's time stop (Tekken 7's 0x828c, slow motion: its value's low 16
+// bits the frames, from the frame it is at; 0x828d: the attacker immune):
+// the opponent stops, its own frame not run (sub_0414FA10: its move,
+// animation, inputs) and held where it is against the battle's pushing and
+// knockback, until the frames are over or a fighter is hit. Its hit stun
+// waits meanwhile, so a super cancelled into from a string connects
+// (Geese's 1,2,1,2 into Double Reppuken: the hit comes at frame 80).
+// Tekken 7 shows the attacker meanwhile through a camera of its own (the
+// move's 0x8439 / 0x843a: camera animations); here a close-up from the
+// side the camera is on, turning and closing in slowly, then the title's
+// camera again.
+struct Stop {
+    uint32_t fighter = 0;
+    int frames = 0;
+    uint32_t place[3] = {};      // its x, y, z (as they are)
+    int16_t health[2] = {};      // the fighters' then
+    uint32_t attacker = 0;
+    int total = 0;
+    float side = 0;              // the camera's side of the attacker (+1, -1; 0: not known yet)
+};
+Stop g_stop;
+uint32_t g_active[2] = {}; // the fighters in play, as of the last fighters' frame
+bool stopped(uint32_t fighter) { return g_stop.frames > 0 && fighter == g_stop.fighter; }
+
+// The camera that renders the scene (title/framedata.cpp has its fields):
+// eye, target, up at +0x10, +0x20, +0x30, projection +0xA0, view +0xE0
+// (row vectors, looking down its -z), the two multiplied at +0x60.
+constexpr uint32_t kCameraHolder = 0x1084FEBC, kCameraManager = 732, kRenderCamera = 392;
+constexpr uint32_t kEye = 0x10, kTarget = 0x20, kUp = 0x30, kViewProjection = 0x60, kProjection = 0xA0, kView = 0xE0;
+constexpr uint32_t kBodySpheres = 2168, kBodySphereSize = 24, kBodySphereCount = 14;
+// The close-up: this far from the attacker's chest (mm), from this angle off
+// its line to the opponent (radians), a little above it, over the stop.
+constexpr float kStopDistance[2] = {3200, 2400}, kStopAngle[2] = {1.05f, 0.55f}, kStopAbove = 150;
+
+float ldf(uint8_t* base, uint32_t at) {
+    const uint32_t bits = ppc::ld32(base, at);
+    float v;
+    std::memcpy(&v, &bits, 4);
+    return v;
+}
+void stf(uint8_t* base, uint32_t at, float v) {
+    uint32_t bits;
+    std::memcpy(&bits, &v, 4);
+    ppc::st32(base, at, bits);
+}
+
+void stop_camera(uint8_t* base) {
+    const uint32_t holder = ppc::ld32(base, kCameraHolder);
+    const uint32_t manager = holder ? ppc::ld32(base, holder + kCameraManager) : 0;
+    const uint32_t camera = manager ? ppc::ld32(base, manager + kRenderCamera) : 0;
+    if (!camera || !g_stop.attacker) return;
+    // The attacker's chest (its body spheres' middle, up to halfway to the
+    // highest) and its line to the opponent.
+    float middle[3] = {}, top = -1e9f;
+    for (uint32_t i = 0; i < kBodySphereCount; ++i) {
+        const uint32_t at = g_stop.attacker + kBodySpheres + kBodySphereSize * i;
+        for (int k = 0; k < 3; ++k) middle[k] += ldf(base, at + 4 * k) / kBodySphereCount;
+        top = std::max(top, ldf(base, at + 4));
+    }
+    const float chest = (middle[1] + top) / 2;
+    float fx = ldf(base, g_stop.fighter) - middle[0], fz = ldf(base, g_stop.fighter + 8) - middle[2];
+    const float length = std::hypot(fx, fz);
+    if (length < 1) return;
+    fx /= length, fz /= length;
+    const float sx = -fz, sz = fx; // (its side)
+    if (g_stop.side == 0) {
+        const float ex = ldf(base, camera + kEye) - middle[0], ez = ldf(base, camera + kEye + 8) - middle[2];
+        g_stop.side = ex * sx + ez * sz >= 0 ? 1.0f : -1.0f;
+    }
+    const float t = 1.0f - float(g_stop.frames) / float(std::max(1, g_stop.total)); // 0 to 1 over the stop
+    const float ease = t * t * (3 - 2 * t);
+    const float distance = kStopDistance[0] + (kStopDistance[1] - kStopDistance[0]) * ease;
+    const float angle = kStopAngle[0] + (kStopAngle[1] - kStopAngle[0]) * ease;
+    const float target[3] = {middle[0], chest, middle[2]};
+    const float eye[3] = {target[0] + (fx * std::cos(angle) + g_stop.side * sx * std::sin(angle)) * distance,
+                          chest + kStopAbove,
+                          target[2] + (fz * std::cos(angle) + g_stop.side * sz * std::sin(angle)) * distance};
+    // Its axes: back from the target to the eye, right = up x back, up = back x right.
+    float back[3] = {eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]};
+    const float bl = std::hypot(back[0], back[1], back[2]);
+    for (float& v : back) v /= bl;
+    float right[3] = {back[2], 0, -back[0]};
+    const float rl = std::hypot(right[0], right[2]);
+    right[0] /= rl, right[2] /= rl;
+    const float up[3] = {back[1] * right[2] - back[2] * right[1], back[2] * right[0] - back[0] * right[2],
+                         back[0] * right[1] - back[1] * right[0]};
+    const float* axes[3] = {right, up, back};
+    float view[16], projection[16];
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) view[4 * r + c] = axes[c][r];
+        view[4 * r + 3] = 0;
+    }
+    for (int c = 0; c < 3; ++c) view[12 + c] = -(axes[c][0] * eye[0] + axes[c][1] * eye[1] + axes[c][2] * eye[2]);
+    view[15] = 1;
+    for (int i = 0; i < 16; ++i) projection[i] = ldf(base, camera + kProjection + 4 * i);
+    for (int k = 0; k < 3; ++k) {
+        stf(base, camera + kEye + 4 * k, eye[k]);
+        stf(base, camera + kTarget + 4 * k, target[k]);
+        stf(base, camera + kUp + 4 * k, k == 1 ? 1.0f : 0.0f);
+    }
+    for (int r = 0; r < 4; ++r)
+        for (int c = 0; c < 4; ++c) {
+            float v = 0;
+            for (int k = 0; k < 4; ++k) v += view[4 * r + k] * projection[4 * k + c];
+            stf(base, camera + kView + 4 * (4 * r + c), view[4 * r + c]);
+            stf(base, camera + kViewProjection + 4 * (4 * r + c), v);
+        }
+}
 // Tekken 7 draws it at its screen's bottom, where the title has its own
-// texts (Arcade's stage and time, Promotion Chance): a little higher here;
-// in Practice above the frame data panels, when they show.
-// The left one moves right of Practice's input history while that shows.
-constexpr float kRaise = 70, kAbovePanels = 8, kBesideHistory = 6;
-float g_raise = kRaise, g_shift = 0; // (this frame's, Tekken 7's units)
+// texts (Arcade's stage and time, Promotion Chance): a little higher here
+// (Practice's frame data panels go above it). The left one moves right of
+// Practice's input history while that shows.
+constexpr float kRaise = 70, kBesideHistory = 6;
+float g_shift = 0; // (this frame's, Tekken 7's units)
+float g_tops[2] = {};                            // the sides' tops as last shown (0: none)
+std::chrono::steady_clock::time_point g_tops_until; // and until when they show
 constexpr int kMaxSlots = 4;
 
 // ------------------------------------------------------------------------------------- the HUD's data
@@ -109,7 +223,8 @@ struct Bar {
 struct Side {
     std::map<std::string, Clip> clips;
     Bar bars[kMaxSlots];
-    float left = 0, bottom = 0; // the panel's (its bars' and resting clips': moved above / beside Practice's)
+    float left = 0; // the panel's (its bars' and resting clips': moved beside Practice's input history)
+    float top = 0;  // what it shows at rest (not its effects), to its visible texels
 };
 struct Hud {
     Side sides[2];
@@ -180,6 +295,33 @@ bool read_picture(std::istringstream& s, Picture& p) {
     return true;
 }
 
+// Where a picture shows on Tekken 7's screen, at the top: its texels at
+// least half covering (an added picture's by their brightness; soft glows'
+// faint edges left out). 1e9: nowhere.
+float visible_top(const Rgba& image, const Picture& p) {
+    if (p.v0 == p.v1) return 1e9f;
+    const auto texel = [](float a, uint32_t size) { return static_cast<uint32_t>(std::clamp(a, 0.0f, float(size))); };
+    const uint32_t u0 = texel(std::min(p.u0, p.u1), image.width), u1 = texel(std::max(p.u0, p.u1), image.width);
+    const uint32_t v0 = texel(std::min(p.v0, p.v1), image.height), v1 = texel(std::max(p.v0, p.v1), image.height);
+    const bool added = (p.add & 0xFF) == 0xFF;
+    const auto shows = [&](const uint8_t* t) {
+        uint32_t cover = t[3] * (p.mult & 0xFF) / 255;
+        if (added) cover = cover * std::max({t[0], t[1], t[2]}) / 255;
+        return cover >= 128;
+    };
+    int first = -1, last = -1;
+    for (uint32_t v = v0; v < v1; ++v)
+        for (uint32_t u = u0; u < u1; ++u)
+            if (shows(image.at(u, v))) {
+                if (first < 0) first = static_cast<int>(v);
+                last = static_cast<int>(v);
+                break;
+            }
+    if (first < 0) return 1e9f;
+    const auto y = [&](float v) { return p.y0 + (v - p.v0) / (p.v1 - p.v0) * (p.y1 - p.y0); };
+    return std::min(y(float(first)), y(float(last + 1)));
+}
+
 std::optional<Hud> read_hud(const fs::path& directory) {
     std::ifstream in(directory / "gauge.ini");
     std::ifstream nut(directory / "gauge.nut", std::ios::binary);
@@ -230,15 +372,17 @@ std::optional<Hud> read_hud(const fs::path& directory) {
         }
     }
     for (Side& side : hud.sides) { // the panel's extent at rest
-        side.left = 1e9f, side.bottom = 0;
-        const auto take = [&](const Picture& p) {
-            side.left = std::min({side.left, p.x0, p.x1}), side.bottom = std::max({side.bottom, p.y0, p.y1});
-        };
+        side.left = 1e9f, side.top = 1e9f;
+        const auto take = [&](const Picture& p) { side.left = std::min({side.left, p.x0, p.x1}); };
         for (const Bar& bar : side.bars)
-            if (bar.present) take(bar.picture);
+            if (bar.present) take(bar.picture), side.top = std::min(side.top, visible_top(hud.image, bar.picture));
         for (const char* name : {"base", "base1", "static", "num0"})
             if (const auto it = side.clips.find(name); it != side.clips.end() && !it->second.frames.empty())
                 for (const Picture& p : it->second.frames.back()) take(p); // (Geese's: its last, "Stay")
+        for (const auto& [name, clip] : side.clips) // (not the effects, which pass over what is above)
+            if (!clip.frames.empty() && name != "light" && name != "lightning" && name != "focus")
+                for (const Picture& p : clip.frames.back()) side.top = std::min(side.top, visible_top(hud.image, p));
+        if (side.top > 1e8f) side.top = 0;
     }
     return hud;
 }
@@ -290,15 +434,14 @@ Player& player(uint32_t address, int slot) {
 }
 
 // --------------------------------------------------------------------------------------- the flash
-void write_colour(uint32_t fighter, Player& p) {
+// The fighter's own colours times `tint` (`t`: 0 none, 1 all of it).
+void write_colour(uint32_t fighter, Player& p, const float (&tint)[3], float t) {
     if (!p.colour) p.colour = system_alloc(16);
-    const float t = p.flash >= kFlashFrames - kFlashHold ? 1.0f
-                                                         : float(p.flash) / float(kFlashFrames - kFlashHold);
     for (int i = 0; i < 4; ++i) {
         uint32_t bits = ppc::ld32(guest_base(), fighter + kOwnColour + 4 * i);
         float own;
         std::memcpy(&own, &bits, 4);
-        const float value = own * (i < 3 ? 1.0f + (kYellow[i] - 1.0f) * t : 1.0f);
+        const float value = own * (i < 3 ? 1.0f + (tint[i] - 1.0f) * t : 1.0f);
         std::memcpy(&bits, &value, 4);
         ppc::st32(guest_base(), p.colour + 4 * i, bits);
     }
@@ -321,8 +464,8 @@ void add_quad(std::vector<gpu::overlay::Quad>& out, const Hud& hud, Picture p, c
     if (p.x1 < p.x0) std::swap(p.x0, p.x1), std::swap(p.u0, p.u1);
     if (p.y1 < p.y0) std::swap(p.y0, p.y1), std::swap(p.v0, p.v1);
     gpu::overlay::Quad q;
-    q.x0 = (p.x0 + g_shift) * kScale, q.y0 = (p.y0 - g_raise) * kScale;
-    q.x1 = (p.x1 + g_shift) * kScale, q.y1 = (p.y1 - g_raise) * kScale;
+    q.x0 = (p.x0 + g_shift) * kScale, q.y0 = (p.y0 - kRaise) * kScale;
+    q.x1 = (p.x1 + g_shift) * kScale, q.y1 = (p.y1 - kRaise) * kScale;
     q.u0 = p.u0 / g_atlas_width, q.u1 = p.u1 / g_atlas_width;
     q.v0 = (hud.atlas_y + p.v0) / g_atlas_height, q.v1 = (hud.atlas_y + p.v1) / g_atlas_height;
     q.top = q.bottom = p.mult;
@@ -515,7 +658,19 @@ bool requirement(uint32_t address, int slot, uint32_t kind, uint32_t param, bool
 }
 
 bool property(uint32_t address, int slot, uint32_t id, uint32_t value) {
-    if (id != kAdd && id != kNoGain && id != kFlash && id != kMaxAdd) return false;
+    if (id != kAdd && id != kNoGain && id != kFlash && id != kMaxAdd && id != kStop) return false;
+    if (id == kStop) {
+        const int s = address == g_active[0] ? 0 : address == g_active[1] ? 1 : -1;
+        if (s < 0 || !g_active[1 - s]) return true;
+        uint8_t* base = guest_base();
+        g_stop = {g_active[1 - s], static_cast<int>(value & 0xFFFF)};
+        g_stop.attacker = address, g_stop.total = g_stop.frames;
+        for (int i = 0; i < 3; ++i) g_stop.place[i] = ppc::ld32(base, g_stop.fighter + 4 * i);
+        for (int k = 0; k < 2; ++k) g_stop.health[k] = static_cast<int16_t>(ppc::ld16(base, g_active[k] + kHealth));
+        if (std::getenv("TTT2_TRACE_GAUGE"))
+            std::fprintf(stderr, "ttt2: gauge: %08X stops %08X for %d frames\n", address, g_stop.fighter, g_stop.frames);
+        return true;
+    }
     const Fighter* f = fighter_of(slot);
     if (!f) return true;
     Player& p = player(address, slot);
@@ -540,6 +695,7 @@ void situation(uint32_t kind) {
     static constexpr uint32_t kKeep[] = {4, 5, 6, 7, 8, 9, 10, 16, 18};
     if (std::getenv("TTT2_TRACE_GAUGE")) std::fprintf(stderr, "ttt2: gauge: situation %u\n", kind);
     for (auto& [address, p] : g_players) p.max_timer = 0; // (a round's start ends a MAX mode)
+    g_stop = {};
     if (std::find(std::begin(kKeep), std::end(kKeep), kind) != std::end(kKeep)) return;
     for (auto& [address, p] : g_players) {
         p.value = start_value();
@@ -552,6 +708,13 @@ void situation(uint32_t kind) {
 
 void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
     if (g_fighters.empty()) return;
+    g_active[0] = fighters[0], g_active[1] = fighters[1];
+    if (g_stop.frames > 0) { // (over early when a fighter is hit, or another is in play)
+        bool over = --g_stop.frames <= 0 || (g_stop.fighter != fighters[0] && g_stop.fighter != fighters[1]);
+        for (int k = 0; k < 2; ++k)
+            over |= fighters[k] && static_cast<int16_t>(ppc::ld16(base, fighters[k] + kHealth)) < g_stop.health[k];
+        if (over) g_stop = {};
+    }
     if (std::getenv("TTT2_TRACE_GAUGE")) { // the moves, as they start
         static uint32_t shown[2] = {};
         static const auto start = std::chrono::steady_clock::now();
@@ -594,8 +757,9 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
             if (!no_gain) gains[1 - s] += damage * who[1 - s]->config.gain[blocked ? 1 : 3] / 100;
         }
         if (std::getenv("TTT2_TRACE_GAUGE"))
-            std::fprintf(stderr, "ttt2: gauge: side %d %s %d: defender +%d, attacker +%d\n", s,
-                         blocked ? "blocked" : "lost", damage, gains[s] - before[s], gains[1 - s] - before[1 - s]);
+            std::fprintf(stderr, "ttt2: gauge: side %d %s %d at frame %u: defender +%d, attacker +%d\n", s,
+                         blocked ? "blocked" : "lost", damage, ppc::ld32(base, attacker ? attacker + 212 : defender + 212),
+                         gains[s] - before[s], gains[1 - s] - before[1 - s]);
     }
     for (int s = 0; s < 2; ++s) {
         if (!who[s] || !gains[s]) continue;
@@ -605,11 +769,16 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
     // The MAX modes run down.
     for (auto& [address, p] : g_players)
         if (p.max_timer > 0) --p.max_timer;
-    // The flashes.
+    // The flashes, and the MAX modes' tint (fading out over their last frames).
     for (auto& [address, p] : g_players) {
-        if (p.flash <= 0) continue;
-        write_colour(address, p);
-        --p.flash;
+        if (p.flash > 0) {
+            const int fade = kFlashFrames - kFlashHold;
+            write_colour(address, p, kYellow, p.flash >= fade ? 1.0f : float(p.flash) / float(fade));
+            --p.flash;
+        } else if (p.max_timer > 0) {
+            const float pulse = 0.75f + 0.25f * std::cos(6.2831853f * float(p.max_timer % kPulseFrames) / kPulseFrames);
+            write_colour(address, p, kLightBlue, pulse * std::min(1.0f, float(p.max_timer) / 12.0f));
+        }
     }
     // The HUD.
     if (!fighters[0] || !fighters[1]) return;
@@ -622,19 +791,20 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
     }
     if (!g_atlas_height) return;
     std::vector<gpu::overlay::Quad> quads;
+    const auto now = std::chrono::steady_clock::now();
+    g_tops[0] = g_tops[1] = 0;
+    g_tops_until = now + std::chrono::milliseconds(250);
     for (int s = 0; s < 2; ++s) {
         if (!who[s] || !who[s]->hud) continue;
-        g_raise = kRaise, g_shift = 0;
-        const float left = who[s]->hud->sides[s].left, bottom = who[s]->hud->sides[s].bottom;
-        if (const float top = framedata::panels_top(s); top && bottom > 0)
-            g_raise = std::max(kRaise, bottom - (top - kAbovePanels) / kScale);
-        if (const float right = framedata::history_right(); right && s == 0 && left < 1e9f)
-            g_shift = std::max(0.0f, (right + kBesideHistory) / kScale - left);
-        // (a frame Practice's panels are not reported, as Geese's MAX activation stops the game, keeps the place)
-        static struct { float raise = kRaise, shift = 0; std::chrono::steady_clock::time_point at; } kept[2];
-        const auto now = std::chrono::steady_clock::now();
-        if (g_raise != kRaise || g_shift != 0) kept[s] = {g_raise, g_shift, now};
-        else if (now - kept[s].at < std::chrono::milliseconds(500)) g_raise = kept[s].raise, g_shift = kept[s].shift;
+        const Side& side = who[s]->hud->sides[s];
+        g_shift = 0;
+        if (const float right = framedata::history_right(); right && s == 0 && side.left < 1e9f)
+            g_shift = std::max(0.0f, (right + kBesideHistory) / kScale - side.left);
+        // (a frame Practice's history is not reported, as Geese's MAX activation stops the game, keeps the place)
+        static struct { float shift = 0; std::chrono::steady_clock::time_point at; } kept[2];
+        if (g_shift != 0) kept[s] = {g_shift, now};
+        else if (now - kept[s].at < std::chrono::milliseconds(500)) g_shift = kept[s].shift;
+        if (side.top) g_tops[s] = (side.top - kRaise) * kScale;
         draw(quads, *who[s]->hud, who[s]->config, player(fighters[s], slots[s]), s);
     }
     gpu::overlay::show_hud(std::move(quads), 0.1);
@@ -642,10 +812,27 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
 
 uint32_t colour(uint32_t fighter) {
     const auto it = g_players.find(fighter);
-    return it != g_players.end() && it->second.flash > 0 && it->second.colour ? it->second.colour : 0;
+    if (it == g_players.end() || !it->second.colour) return 0;
+    return it->second.flash > 0 || it->second.max_timer > 0 ? it->second.colour : 0;
 }
 
+void battle_frame(uint8_t* base) {
+    if (g_stop.frames <= 0) return;
+    for (int i = 0; i < 3; ++i) ppc::st32(base, g_stop.fighter + 4 * i, g_stop.place[i]);
+    stop_camera(base);
+}
+
+float top(int side) { return std::chrono::steady_clock::now() < g_tops_until ? g_tops[side & 1] : 0; }
+
 } // namespace cafe::title::gauge
+
+// A fighter's own frame (r3 the fighter, r4 its opponent): not run while a
+// super's time stop holds it.
+PPC_FUNC(sub_0414FA10_orig);
+PPC_FUNC(sub_0414FA10) {
+    if (cafe::title::gauge::stopped(ctx.r[3])) return;
+    sub_0414FA10_orig(ctx, base);
+}
 
 // The title's situation set-up (r3: the situation's kind; Practice's 15 too,
 // for its start and its position reset).

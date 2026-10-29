@@ -18,7 +18,7 @@ import types
 from . import InputError, pack, shared, source as sources
 from .characters import CHARACTERS, GAMES, definition, game_of
 from .convert import art, chains, cloth, effects as fx, face, gauge, idmaps, itemdb, model, move_overrides, movelist, \
-    moveset, outfits, particles, tagsystem, tiger, voice, weapons
+    moveset, outfits, particles, sounds, tagsystem, tiger, voice, weapons
 from .tekken7 import tkmvst
 from .tekken7.autodump import FILES
 from .tekken7.pak import EncryptedError, Paks, pak_names
@@ -318,20 +318,29 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
     pictures = art.pack_files(source, archives, rpx, d, slot, log=lambda s: log('         ' + s))
 
     step('voice: %s\'s %s voice in %s\'s sound banks' % (d.NAME, source.NAME, d.DONOR))
+    effects = None
+    if own_moveset is not None and game_of(d) == 'tekken7' and gauge.of(d):
+        effects = sounds.Effects(source.paks, d.TEKKEN7_CODE, own_moveset, idmaps.xps,
+                                 lambda name: not sounds.LEFT_OUT.search(name))
+        effects.base = sounds.item_count(rpx, d.DONOR)
     try:
         clips = source.clips(d)
         if saved8 is not None:              # (Tekken 8: the lines her own moves say, shouts after hers)
             clips.add_lines(saved8[0])
         vlist = voice.voice_list(rpx, d.DONOR)
-        banks, lines, wins, voice_extra = voice.build(
+        banks, lines, wins, voice_extra, sound_extra = voice.build(
             clips, {w: archives.raw(key_of('%s_%s.nus3bank' % (w, d.DONOR))) for w in ('se_Chr', 'se_Dwi', 'rm_Dst',
-                                                                                     'rm_Dwi')}, d.CODE, vlist, slot)
+                                                                                     'rm_Dwi')}, d.CODE, vlist, slot,
+            effects.clips if effects else ())
     except KeyError as error:
         raise InputError('%s has no %s voice files (%s): is it the Wii U game\'s folder?' % (game, d.DONOR, error))
     merged, chr_tones = voice.merge(banks.pop('se_Chr_%s.nus3bank' % d.CODE), banks.pop('se_Dwi_%s.nus3bank' % d.CODE))
     banks['se_Chr_%s.nus3bank' % d.CODE] = merged
     lines.append('se_Chr_%s: with se_Dwi_%s\'s tones after its %d (one bank in a match), %d KB'
                  % (d.CODE, d.CODE, chr_tones, len(merged) // 1024))
+    if effects:
+        lines.append('sound effects (its moves\' and projectiles\' item sounds %d on): %s'
+                     % (effects.base, ', '.join(effects.names)))
     for line in lines:
         log('         ' + line)
 
@@ -354,7 +363,8 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
     else:
         moves, motions, xml, effect_files, mvl = _converted_moveset(source.paks, archives, d, slot, place, own_moveset,
                                                                     heihachi, donor_xml, effect_files, wins, vlist,
-                                                                    voice_extra, opt_anims, part3, bon, log, step)
+                                                                    voice_extra, opt_anims, part3, bon, log, step,
+                                                                    effects)
 
     lids = face.tekken7_lids(tkmvst.face_animations(own_moveset)) if own_moveset is not None else None
     moves, motions, changed, lid_scales = face.retarget(moves, motions, bone.read(bon),
@@ -384,7 +394,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
                                    (nud, nut, bon, mop), standing=standing,
                                    log=lambda s: log('         ' + s.strip()), reference_bon=bon))
         outfit_codes = outfits.codes(d)
-    target = pack.write(out, d, contents, slot, chr_tones=chr_tones, voice_extra=voice_extra,
+    target = pack.write(out, d, contents, slot, chr_tones=chr_tones, voice_extra=voice_extra, sound_extra=sound_extra,
                         weapons=weapons.of_skeleton(bone.read(bon), getattr(d, 'WEAPONS', ())), outfits=outfit_codes)
     step('wrote %s' % target)
 
@@ -394,7 +404,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
 
 
 def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, effect_files, wins, vlist, voice_extra,
-                       opt_anims, part3, bon, log, step):
+                       opt_anims, part3, bon, log, step, effects=None):
     """The fighter's own Tekken 7 moveset converted (k: its tkmvst.read), with its effects and command list ->
     (moveset bytes, motion pack bytes, item database, effect files, command list or None)."""
     step('moveset: the id maps from Heihachi in both games')
@@ -415,6 +425,7 @@ def _converted_moveset(paks, archives, d, slot, place, k, heihachi, donor_xml, e
                           archives.entry('data004', 0), maps, usage, place['row'], d)
     _options(c, archives, d, wins, vlist, voice_extra, tag_states, bon)
     c.opt_anims, c.part3 = opt_anims, part3
+    c.effects = effects
     c.run()
     copies = c.split_effects(particles.emitting_frames(paks, d.TEKKEN7_CODE, c.effect_ids),
                              set(c.projectile_effects) | set(itemdb.effect_ids(donor_xml)))

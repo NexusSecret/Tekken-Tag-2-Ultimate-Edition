@@ -480,6 +480,7 @@ class Converter:
     game, end, prefix = 't7', T7_END, None
     linking = 0                         # > 0 while the links of the fighter's own (or converted) moves are made
     gauge = None                        # the definition's GAUGE (convert/gauge.py), set by __init__
+    effects = None                      # its sound effects (convert/sounds.Effects; the importer's), or None
     true_reqs = frozenset()             # (requirement, parameter) pairs true by the definition, set by __init__
     _fit = None                         # FIT's ranges: {'req' / 'prop': {TTT2 id: (lowest, highest)}}, when needed
 
@@ -1028,6 +1029,9 @@ class Converter:
             if t7id == OPPONENT_VOICE8[0]:
                 return OPPONENT_VOICE8[1].get(v & 0xFFFFFF) if v >> 24 == VOICE8_BANKS[1] else None
             return self.voice8(v)
+        if t7id in SOUND_PROPS[g] and self.effects is not None and self.effects.move_value(v) is not None:
+            self.stats['sound effects (item sounds of its own)'] += 1
+            return self.effects.move_value(v)
         if t7id in SOUND_PROPS[g] and v not in self.donor_sound[self.prop_map.lookup(t7id)[0]] and \
                 not self.own_voice(v):
             return None
@@ -1173,6 +1177,11 @@ class Converter:
                 if points:
                     rows.append(dict(frame=f, id=DAMAGE_DEAL[g][idv], value=points))
                     self.stats['throw damage dealt'] += 1
+                continue
+            stop = G.stop_frames(t7, idv, v, g) if self.gauge else None
+            if stop:                                        # a super's time stop (convert/gauge.py)
+                rows.append(dict(frame=f, id=G.STOP, value=stop))
+                self.stats['time stops'] += 1
                 continue
             p = self.map_prop(idv) if idv >= 0x8000 else self.map_req(idv)
             if p is None:
@@ -1546,10 +1555,15 @@ class Converter:
         out[0] = PROJ_EFFECT
         for to, fr, n in PROJ_FIELDS:
             out[to:to + n] = v[fr:fr + n]
+        if self.gauge and out[4]:                           # its hits on one fighter (convert/gauge.py)
+            out[4] = G.projectile_hits(self.k, pi, self.game, M.cancels, M.reqs)
         for f in PROJ_SOUNDS:
             if out[f] and out[f] not in self.known_sounds and not self.own_voice(out[f]):
                 out[f] = 0
                 self.stats['projectile sound dropped'] += 1
+        if self.effects is not None and self.effects.hit_value(v[2]) is not None:   # its missile's hit sound
+            out[16] = self.effects.hit_value(v[2])
+            self.stats['projectile hit sounds (item sounds of its own)'] += 1
         n0 = len(self.T['hit_conditions'])
         hc = self.conv_hitconds(p['hit_condition'])
         out[19] = hc if hc is not None and len(self.T['hit_conditions']) > n0 else 0

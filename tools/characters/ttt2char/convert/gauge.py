@@ -9,17 +9,51 @@ the attacker's) in percent of the damage, hud=the HUD movie's object path). Fact
 * property 0x8228 (value 1): the move gains no gauge for its attacks (+0x6b4, read by the gains); 0x8229: the fighter
   lights up (an EX move, a Focus cancel);
 * the gains (0x140713f72): Akuma 37 / 75 / 112 / 225, Geese 21 / 85 / 63 / 255, everyone else 50 / 100 / 150 / 300;
-* Geese's MAX mode: 176 tests its timer (+0xcd8) running, 0x82a9 adds frames to it (at most 720); no gains meanwhile.
+* Geese's MAX mode: 176 tests its timer (+0xcd8) running, 0x82a9 adds frames to it (at most 720); no gains meanwhile;
+* a super's start slows everything but its fighter down to a stop: 0x828c (slow motion: its value's low 16 bits the
+  frames) with 0x828d 1 (the attacker immune), Double Reppuken 70 frames from its 8th, its hit at the 80th.
 """
 # the runtime's requirements: ids no TTT2 moveset uses that TTT2's requirement function takes as false, below 643 (TTT2
 # marks cancel rows testing 643 and above as special ones, never tested for a player: sub_040D2300)
 AT_LEAST, BELOW, MAX_ON = 190, 191, 192
 ADD, NO_GAIN, FLASH = 0x8220, 0x8222, 0x8223  # the runtime's properties (TTT2's interpreter passes over them)
 MAX_ADD = 0x8224
+STOP = 0x8225                                 # the opponent stops for value frames (title/gauge.cpp)
+# A Tekken 7 projectile hits a fighter once (Raging Storm's, allowed 10, deals its 43 once; Eliza's qcf+1+2 is two
+# projectiles of one hit each); one that hits more turns into the next on its hit (a cancel row testing 784 with
+# option 0x40: Double Reppuken 11 -> 12 -> 13 -> 14 -> 15, five hits of 13). TTT2's projectile deals its hits on
+# the frames it touches the opponent, so it is given the chain's length (the hits come faster than Tekken 7's waves).
+PROJECTILE_HIT = {'t7': 784, 't8': None}
+SLOW_MOTION = {'t7': 0x828c, 't8': None}
+SLOW_MOTION_IMMUNE = {'t7': 0x828d, 't8': None}
 # Geese's MAX mode (Tekken 7: the timer at player +0xcd8): 176 tests it running, 0x82a9 adds frames to it (activation
 # 720, the MAX cancel dash 360; EX moves -160, his supers -720), capped at 720 (0x1434df508)
 REQS = {'t7': {629: AT_LEAST, 635: BELOW, 176: MAX_ON}, 't8': {}}
 PROPS = {'t7': {0x81c2: ADD, 0x8228: NO_GAIN, 0x8229: FLASH, 0x82a9: MAX_ADD}, 't8': {}}
+
+
+def stop_frames(rows, idv, v, game):
+    """The frames a super's slow motion (property idv = v among the move's (frame, id, value, ...) rows) stops the
+    opponent for, when its fighter is immune to it; else None."""
+    if idv != SLOW_MOTION[game] or not v & 0xFFFF:
+        return None
+    if not any(r[1] == SLOW_MOTION_IMMUNE[game] and r[2] == 1 for r in rows):
+        return None
+    return v & 0xFFFF
+
+
+def projectile_hits(k, pi, game, cancels, reqs):
+    """The hits Tekken 7 projectile pi of moveset k deals a fighter: one, and one more for each projectile it turns
+    into on a hit (cancels(k, i) / reqs(k, i): the id maps' readers)."""
+    seen, n = {pi}, 1
+    rows = k.tables['projectiles']
+    while True:
+        nxt = next((c['move_id'] for c in cancels(k, rows[pi]['cancel'])
+                    if c['option'] & 0x40 and any(a == PROJECTILE_HIT[game] for a, _ in reqs(k, c['req']))), None)
+        if nxt is None or not 0 < nxt < len(rows) or nxt in seen:
+            return n
+        seen.add(nxt)
+        pi, n = nxt, n + 1
 
 
 def of(defn):

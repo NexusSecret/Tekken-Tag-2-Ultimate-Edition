@@ -159,7 +159,9 @@ constexpr uint32_t kVoiceLists = 0x107D44EC;   // 63 x {u32 entries, u32 count, 
 // tones its pack appends (character.ini voice_extra), added to its list.
 constexpr uint32_t kVoiceMasks = 0x105DEFDC;   // 10 x u32 by category
 constexpr uint32_t kShoutMask = 0x20;        // category 5: shouts
-constexpr uint32_t kItemSounds = 0x107D4044;   // 63 x {u32 sound ids, u32 count}
+constexpr uint32_t kItemSounds = 0x107D4044;   // 63 x {u32 sound ids, u32 count}: a move's item sound n
+// (12 << 24 | n); an added fighter's own sound effects (character.ini
+// sound_extra) follow the donor's.
 constexpr uint32_t kSoundTable = 0x107D4AC0;   // 8506 x {u32 tone, u32 bank id, u32 group, u32 flags}
 constexpr uint32_t kSoundCount = 8506;
 constexpr uint32_t kFirstNewSound = 0x221E;
@@ -271,7 +273,11 @@ struct Voice {
     std::vector<uint32_t> extra;               // those shouts' tones in its bank (character.ini voice_extra),
     std::vector<uint32_t> extra_sounds;        // their sound ids
     uint32_t shout_entry = 0;                  // the donor's last shout entry (theirs copy it)
-    uint32_t item_sounds = 0, items = 0;       // its item sounds (the donor's, moved) and their count
+    uint32_t item_sounds = 0, items = 0;       // its item sounds (the donor's, moved, then its effects) and their
+                                               // count
+    std::vector<uint32_t> effects;             // its sound effects' tones in its bank (character.ini sound_extra:
+                                               // its Tekken 7 moves' and projectiles' sounds, convert/sounds.py)
+    std::vector<uint32_t> effect_sounds;       // their sound ids
 };
 std::vector<Voice> g_voice;
 uint32_t g_sound_table = 0, g_sound_count = 0; // the extended sound table (0: the title's)
@@ -371,6 +377,7 @@ struct Pack {
     int slot = -1;     // its number, as the importer chose it (shared/ holds pictures by number)
     uint32_t chr_tones = 0; // its voice bank's shouts (the win quotes' tones come after; 0: no merged bank)
     std::vector<uint32_t> voice_extra; // its bank's shouts past the donor's (appended to the voice list)
+    std::vector<uint32_t> sound_extra; // its bank's sound effects (appended to the item sounds)
     std::vector<Weapon> weapons;       // character.ini weapons: k:parent:points[:summon] (see pose_weapons)
     std::vector<std::string> outfits;  // optional complete body sets, in chooser order
     std::optional<gauge::Config> gauge; // a Tekken 7 2D fighter's gauge (title/gauge.h)
@@ -434,6 +441,9 @@ std::optional<Pack> read_pack(const fs::path& directory) {
         } else if (key == "voice_extra") {
             std::istringstream tones(value);
             for (uint32_t tone; tones >> tone;) pack.voice_extra.push_back(tone);
+        } else if (key == "sound_extra") {
+            std::istringstream tones(value);
+            for (uint32_t tone; tones >> tone;) pack.sound_extra.push_back(tone);
         } else if (key == "weapons") { // k:parent:points[:summon], points n or n>slot, e.g. 1:9:0,1,2 or 4:9:0>0,1>1:3
             std::istringstream items(value);
             for (std::string item; items >> item;) {
@@ -703,6 +713,7 @@ bool add_entries(const Pack& pack, uint32_t donor_row, size_t slot) {
     std::vector<std::string> bank_files;
     voice.chr_tones = pack.chr_tones;
     voice.extra = pack.voice_extra;
+    voice.effects = pack.sound_extra;
     for (size_t b = 0; b < std::size(kVoiceBanks); ++b) {
         if (b == 1) continue; // win quotes: in se_Chr_ (an older pack's own se_Dwi_ is not played)
         const std::string name = std::string(kVoiceBanks[b]) + pack.code + ".nus3bank";
@@ -821,7 +832,7 @@ void patch_sounds() {
             const uint32_t bank = load(kSoundTable + 16 * sid + 4);
             if (bank == chr_bank(donor) || (voice.chr_tones && bank == dwi_bank(donor))) extra.push_back({k, sid});
         }
-        if (voice.keys[0]) shouts += static_cast<uint32_t>(voice.extra.size());
+        if (voice.keys[0]) shouts += static_cast<uint32_t>(voice.extra.size() + voice.effects.size());
         if (voice.name_tone) ++names;
     }
     if (!extra.empty() || names || shouts) {
@@ -862,6 +873,22 @@ void patch_sounds() {
             }
             voice.shout_entry = shout;
         }
+        // Its sound effects: copies of the donor's first item sound's entry
+        // playing the appended tones (its bank's item sound tones:
+        // convert/voice.py).
+        for (size_t k = 0; k < g_added.size(); ++k) {
+            Voice& voice = g_voice[k];
+            const uint32_t row = kItemSounds + 8 * g_added[k].donor;
+            if (!g_added[k].active || !voice.keys[0] || voice.effects.empty() || load(row + 4) == 0) continue;
+            for (const uint32_t tone : voice.effects) {
+                const uint32_t to = g_sound_table + 16 * next;
+                std::memcpy(guest_pointer(to), guest_pointer(kSoundTable + 16 * load(load(row))), 16);
+                store(to, tone);
+                store(to + 4, 0xFFFFFFFF);
+                voice.effect_sounds.push_back(next);
+                voice.copies.push_back(next++);
+            }
+        }
     }
     for (size_t k = 0; k < g_added.size(); ++k) {
         if (!g_added[k].active) continue;
@@ -886,12 +913,15 @@ void patch_sounds() {
             store16(to + 12, kShoutMask);
         }
         // The item sounds.
-        voice.items = load(kItemSounds + 8 * donor + 4);
+        const uint32_t theirs = load(kItemSounds + 8 * donor + 4);
+        voice.items = theirs + static_cast<uint32_t>(voice.effect_sounds.size());
         if (voice.items != 0) {
             voice.item_sounds = system_alloc(4 * voice.items);
-            for (uint32_t e = 0; e < voice.items; ++e) {
+            for (uint32_t e = 0; e < theirs; ++e) {
                 store(voice.item_sounds + 4 * e, moved_id(load(load(kItemSounds + 8 * donor) + 4 * e)));
             }
+            for (size_t e = 0; e < voice.effect_sounds.size(); ++e)
+                store(voice.item_sounds + 4 * (theirs + static_cast<uint32_t>(e)), voice.effect_sounds[e]);
         }
     }
 }
@@ -2474,7 +2504,11 @@ PPC_FUNC(sub_077537D0) {
     const uint32_t row = kItemSounds + 8 * g_added[k].donor, theirs[2] = {load(row), load(row + 4)};
     store(row, g_voice[k].item_sounds);
     store(row + 4, g_voice[k].items);
+    const uint32_t asked = ctx.r[3];
     with_donor_id(ctx, base, player, sub_077537D0_orig);
+    if (std::getenv("TTT2_TRACE_SOUNDS"))
+        std::fprintf(stderr, "ttt2: sounds: item sound %u of added fighter %d -> %08X (%u items)\n", asked, k,
+                     static_cast<uint32_t>(ctx.r[3]), g_voice[k].items);
     store(row, theirs[0]);
     store(row + 4, theirs[1]);
 }
@@ -3507,12 +3541,16 @@ PPC_FUNC(sub_069D8B30) {
 // it at the touchdown (as TTT2's own landing does, sub_04336854 @0x43371ac),
 // so its landing cancel runs. Chained air moves (0x822C again) keep the arc;
 // 0x8226 in an air move restarts it from where the player is (dive kicks).
+// An air move that throws a projectile (Akuma's air fireball: frame 16)
+// hangs at its height until it has thrown it: falling on, one made late in
+// the jump touched down first, and going to ground_fall skipped the throw.
 namespace {
 constexpr uint32_t kPlayerY = 4, kPlayerFrame = 212, kPlayerFrame2 = 240, kPlayerFrameF = 248,
                    kPlayerFrameF2 = 252, kPlayerFrameFixed = 256, kPlayerMove = 280, kPlayerVy = 360,
                    kPlayerHold = 424, kPlayerHover = 901, kPlayerGravityMode = 132, kPlayerSlow1 = 1712,
                    kPlayerSlow2 = 1720;
-constexpr uint32_t kMoveGroundFall = 0x48;
+constexpr uint32_t kMoveGroundFall = 0x48, kMoveProperties = 0x50; // properties: 12 B {frame, id, value}
+constexpr uint32_t kProjectileSpawnProp = 0x8168;
 constexpr uint32_t kSlowMotionScale = 0x1030CD80; // f32 (sub_04E1A410)
 constexpr float kTitleGravity = 6.0f;             // 0x102520E4
 constexpr uint32_t kArcProp = 0x8226, kArcBakedProp = 0x822D, kArcAirMoveProp = 0x822C;
@@ -3539,6 +3577,17 @@ void set_frame(uint32_t player, int32_t frame) { // as sub_04336854 @0x43371ac
     store(player + kPlayerFrameFixed, static_cast<uint32_t>(frame) << 12);
     storef(player + kPlayerFrameF, static_cast<float>(frame));
     storef(player + kPlayerFrameF2, static_cast<float>(frame));
+}
+
+// Whether the move throws a projectile after frame `frame`.
+bool throws_after(uint32_t move, int32_t frame) {
+    uint32_t row = load(move + kMoveProperties);
+    for (int i = 0; row != 0 && i < 256; ++i, row += 12) {
+        const uint32_t at = load(row), id = load(row + 4);
+        if (at == 0 && id == 0) break;
+        if (id == kProjectileSpawnProp && at < 0x4000 && static_cast<int32_t>(at) > frame) return true;
+    }
+    return false;
 }
 
 float arc_height(const Arc2D& s, int32_t n) {
@@ -3695,7 +3744,8 @@ PPC_FUNC(sub_03AE86A0_orig);
 PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const uint32_t player = ctx.r[3], id = load(ctx.r[4]);
     // (each property comes twice, pass 1 then 0: acted on once)
-    if ((id == gauge::kAdd || id == gauge::kNoGain || id == gauge::kFlash || id == gauge::kMaxAdd) &&
+    if ((id == gauge::kAdd || id == gauge::kNoGain || id == gauge::kFlash || id == gauge::kMaxAdd ||
+         id == gauge::kStop) &&
         (ctx.r[5] != 0 || gauge::property(player, added_slot(player), id, load(ctx.r[4] + 4))))
         return;
     if ((id == kArcProp || id == kArcBakedProp || id == kArcAirMoveProp) && ctx.r[5] == 0 &&
@@ -4052,8 +4102,38 @@ void correct_noctis_assault_exit(uint32_t player) {
 }
 } // namespace
 
+// A player's projectiles: 24 slots of 96 bytes at +7968 (sub_041CE354
+// initialises one, sub_041CED84 runs it every frame, sub_041CE254 frees it):
+// +0 its place, +16 its speed (f32 x y z, a frame), +32 -1 when free, +40
+// the hits it has left, +44 its frames left (at 0 it ends), +60 its row
+// (+8 / +12 forward / up speed, +28 its radius).
+constexpr uint32_t kProjectileSlots = 7968, kProjectileSlotSize = 96, kProjectileSlotCount = 24;
+constexpr uint32_t kProjectileVy = 20, kProjectileFree = 32, kProjectileLife = 44, kProjectileRow = 60;
+constexpr uint32_t kRowForward = 8, kRowUp = 12, kRowRadius = 28;
+constexpr uint32_t kPlayerFloor = 72; // player: f32 the floor's height
+
+// An added fighter's projectile flying down ends where it meets the floor
+// (Tekken 7's missiles do; TTT2's fly on through it for their whole life):
+// its frames left set to 1, so that it ends the way it would at its life's end.
+void end_projectiles_at_floor(uint32_t player) {
+    const float floor = loadf(player + kPlayerFloor);
+    for (uint32_t k = 0; k < kProjectileSlotCount; ++k) {
+        const uint32_t slot = player + kProjectileSlots + kProjectileSlotSize * k;
+        const uint32_t row = load(slot + kProjectileRow);
+        if (load(slot + kProjectileFree) == 0xFFFFFFFF || row == 0 || !(loadf(slot + kProjectileVy) < 0.0f)) continue;
+        const float radius = static_cast<float>(static_cast<int32_t>(load(row + kRowRadius)));
+        if (loadf(slot + 4) - radius <= floor && static_cast<int32_t>(load(slot + kProjectileLife)) > 1) {
+            store(slot + kProjectileLife, 1);
+            if (std::getenv("TTT2_TRACE_PROJECTILES"))
+                std::fprintf(stderr, "ttt2: projectile %08X ends at the floor\n", slot);
+        }
+    }
+}
+
 PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses into the objects at +164, +168)
     const uint32_t player = ctx.r[3];
+    if (g_active && (ctx.lr < 0x04336854 || ctx.lr >= 0x0433AF5C) && slot_of_id(load(player + kPlayerSelectId)) >= 0)
+        end_projectiles_at_floor(player);
     finish_special_assist(ctx, base, player);
     trace_eliza_move(player);
     trace_noctis_air_step(player);
@@ -4066,7 +4146,18 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
         return;
     }
     Arc2D& s = it->second;
-    if (s.mode == Arc2D::kPhysics) {
+    // An air move hangs where it is until it has thrown its projectile, as Tekken 7's air fireball does (thrown
+    // right after the take-off it comes out just above the floor; falling on, one started late in the jump landed
+    // well before its throw): TTT2's gravity step leaves it still (vy = its gravity, which the step takes off).
+    const float hang_y = loadf(player + kPlayerY);
+    const bool hangs = s.mode == Arc2D::kPhysics && hang_y > 0.0f && load(player + kPlayerMove) == s.move &&
+                       throws_after(s.move, static_cast<int32_t>(load(player + kPlayerFrame)));
+    if (hangs) {
+        storef(player + kPlayerVy, kTitleGravity * slow_motion(player));
+        if (std::getenv("TTT2_TRACE_PROJECTILES"))
+            std::fprintf(stderr, "ttt2: %08X hangs at %.0f mm at frame %u, to throw\n", player, hang_y,
+                         load(player + kPlayerFrame));
+    } else if (s.mode == Arc2D::kPhysics) {
         const uint32_t mode = load(player + kPlayerGravityMode);
         if ((mode == 0 || mode == 2) && loadf(player + kPlayerY) > 0.0f && load8(player + kPlayerHover) == 0)
             storef(player + kPlayerVy, loadf(player + kPlayerVy) - (s.g - kTitleGravity) * slow_motion(player));
@@ -4074,6 +4165,7 @@ PPC_FUNC(sub_04336854) { // a fighter's physics, once a frame (r3; it recurses i
     sub_04336854_orig(ctx, base);
     if (own) correct_noctis_assault_exit(player);
     const uint32_t move = load(player + kPlayerMove);
+    if (hangs && move == s.move) storef(player + kPlayerY, hang_y), storef(player + kPlayerVy, 0.0f);
     if (s.mode == Arc2D::kBaked) {
         if (move == s.move) {
             s.n = static_cast<int32_t>(load(player + kPlayerFrame)) - s.f0;
@@ -4148,7 +4240,10 @@ PPC_FUNC(sub_08BF4D44) {
 // player) initialises one of the player's slots: + 7968, 96 bytes each,
 // position at +0, +32 -1 when free, row +60), follows it every frame and goes
 // out of sight (far below the stage) when the projectile is gone (a hit, the
-// end of its life), so that it ends where the projectile does.
+// end of its life), so that it ends where the projectile does. Tekken 7 turns
+// its missile to the way it flies: the look's ahead is the projectile's way
+// from frame to frame (Akuma's air fireball, down and ahead), level
+// sideways.
 //
 // Tekken 7 places some emitters from the floor's height rather than the bone's
 // (ground smoke, a low wave): the converter puts them in a second file of the
@@ -4156,29 +4251,71 @@ PPC_FUNC(sub_08BF4D44) {
 constexpr uint32_t kLevelMark = 0x54374658, kLevelMarkAt = 700;       // "T7FX"
 constexpr uint32_t kProjectileMark = 0x50524F4A, kProjectileMarkAt = 704; // "PROJ"
 constexpr uint32_t kFloorMark = 0x464C4F52, kFloorMarkAt = 708;           // "FLOR"
-constexpr uint32_t kPlayerFloor = 72;                                      // player: f32 the floor's height
 constexpr uint32_t kEffectFile = 932, kEffectPlayer = 720;      // effect object: its loaded file, its slot
 constexpr uint32_t kRigBones = 32, kBoneLocal = 0, kBoneWorld = 64; // sub_04E1A518's model: its bone records
-constexpr uint32_t kProjectileFree = 32, kProjectileRow = 60;
 constexpr float kOutOfSight = -100000.0f;
 struct ProjectileLook {
     uint32_t file, owner, slot, row; // owner: the effect's player slot (+720) the projectile was looked up for
     float before[3]; // the slot's place when the look started (its last projectile's until the first update)
     bool moved;
+    float last[3] = {}, way[3] = {}; // its place last seen and the way it went from there (none yet: 0)
 };
 std::map<uint32_t, uint32_t> g_last_projectile;    // player -> the slot initialised last
+std::map<uint32_t, std::chrono::steady_clock::time_point> g_projectile_thrown; // player -> when
 std::map<uint32_t, ProjectileLook> g_projectile_looks; // effect object -> the projectile it rides
+
+// An effect started with a projectile (spawned on its frame: Akuma's air
+// fireball's flash) turns, whole, to the projectile's path, pitched about its
+// left as the projectile flies up or down: Tekken 7 sets such an effect on
+// the throwing hand, made for the throw's way.
+struct EffectPitch {
+    uint32_t owner;
+    std::chrono::steady_clock::time_point start;
+    float pitch; // radians, up positive
+    bool settled;
+};
+std::map<uint32_t, EffectPitch> g_effect_pitches; // effect object -> its pitch
+constexpr auto kThrownWith = std::chrono::milliseconds(150); // an effect this near a throw is the throw's
+
+float effect_pitch(PPCContext& ctx, uint8_t* base, uint32_t effect) {
+    const uint32_t owner = load(effect + kEffectPlayer);
+    const auto now = std::chrono::steady_clock::now();
+    auto it = g_effect_pitches.find(effect);
+    if (it == g_effect_pitches.end() || it->second.owner != owner)
+        it = g_effect_pitches.insert_or_assign(effect, EffectPitch{owner, now, 0.0f, false}).first;
+    EffectPitch& e = it->second;
+    if (e.settled) return e.pitch;
+    // The projectile may be thrown a frame or two after the effect starts: looked for until kThrownWith.
+    const uint32_t player = guest_call(ctx, base, sub_05C5EF74, {owner});
+    const auto thrown = g_projectile_thrown.find(player);
+    const auto slot = g_last_projectile.find(player);
+    if (thrown != g_projectile_thrown.end() && slot != g_last_projectile.end() &&
+        thrown->second > e.start - kThrownWith && thrown->second < e.start + kThrownWith) {
+        const uint32_t row = load(slot->second + kProjectileRow);
+        const auto ahead = row ? static_cast<float>(static_cast<int32_t>(load(row + kRowForward))) : 0.0f;
+        const auto up = row ? static_cast<float>(static_cast<int32_t>(load(row + kRowUp))) : 0.0f;
+        if (up != 0.0f) e.pitch = std::atan2(up, ahead);
+        e.settled = true;
+        if (std::getenv("TTT2_TRACE_PROJECTILES"))
+            std::fprintf(stderr, "ttt2: effect %08X thrown with %08X (%+.0f ms): pitch %.1f deg\n", effect,
+                         slot->second, std::chrono::duration<double, std::milli>(thrown->second - e.start).count(),
+                         e.pitch * 57.29578f);
+    } else if (now - e.start > kThrownWith) {
+        e.settled = true;
+    }
+    return e.pitch;
+}
 
 // sub_08BE5650(effect, file, ...): the library sets an effect object up for a new effect (objects are reused).
 PPC_FUNC(sub_08BE5650_orig);
 PPC_FUNC(sub_08BE5650) {
-    if (g_active) g_projectile_looks.erase(ctx.r[3]);
+    if (g_active) g_projectile_looks.erase(ctx.r[3]), g_effect_pitches.erase(ctx.r[3]);
     sub_08BE5650_orig(ctx, base);
 }
 
 PPC_FUNC(sub_041CE354_orig);
 PPC_FUNC(sub_041CE354) {
-    if (g_active) g_last_projectile[ctx.r[5]] = ctx.r[3];
+    if (g_active) g_last_projectile[ctx.r[5]] = ctx.r[3], g_projectile_thrown[ctx.r[5]] = std::chrono::steady_clock::now();
     sub_041CE354_orig(ctx, base);
 }
 
@@ -4204,7 +4341,22 @@ bool projectile_look_place(PPCContext& ctx, uint8_t* base, uint32_t effect, uint
         for (int i = 0; i < 3; ++i) at[i] = loadf(slot + 4 * i);
         l.moved = l.moved || at[0] != l.before[0] || at[1] != l.before[1] || at[2] != l.before[2];
         if (l.moved) std::copy(at, at + 3, place); // (until then the body part's place)
+        const float d[3] = {at[0] - l.last[0], at[1] - l.last[1], at[2] - l.last[2]};
+        const float n = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (l.moved && n > 1e-3f && n < 500) // (a step, not its first place)
+            for (int i = 0; i < 3; ++i) l.way[i] = d[i] / n;
+        if (std::getenv("TTT2_TRACE_PROJECTILES") && n > 1e-3f) {
+            const uint32_t player = guest_call(ctx, base, sub_05C5EF74, {owner});
+            std::fprintf(stderr, "ttt2: projectile look %08X at %.0f %.0f %.0f way %.2f %.2f %.2f (its fighter at %.0f %.0f %.0f, the opponent at %.0f %.0f)\n",
+                         effect, at[0], at[1], at[2], l.way[0], l.way[1], l.way[2], player ? loadf(player) : 0.0f,
+                         player ? loadf(player + 4) : 0.0f, player ? loadf(player + 8) : 0.0f,
+                         player && load(player + 0x98) ? loadf(load(player + 0x98)) : 0.0f,
+                         player && load(player + 0x98) ? loadf(load(player + 0x98) + 8) : 0.0f);
+        }
+        std::copy(at, at + 3, l.last);
     } else {
+        if (l.slot && std::getenv("TTT2_TRACE_PROJECTILES"))
+            std::fprintf(stderr, "ttt2: projectile look %08X: its projectile is gone\n", effect);
         l.slot = 0; // gone: never again, even when the slot is used anew
         place[1] = kOutOfSight;
     }
@@ -4272,6 +4424,36 @@ PPC_FUNC(sub_08BE56E4) {
                     const float x = ahead[0] / n, z = ahead[2] / n;
                     const float rows[12] = {z, 0, -x, 0, 0, 1, 0, 0, x, 0, z, 0}; // left = up x ahead, up, ahead
                     for (int i = 0; i < 12; ++i) storef(level + 4 * i, rows[i]);
+                }
+            }
+            // An effect thrown with a projectile: pitched to its path.
+            if (load(file + kProjectileMarkAt) != kProjectileMark) {
+                if (const float pitch = effect_pitch(ctx, base, effect); pitch != 0.0f) {
+                    const float c = std::cos(pitch), s = std::sin(pitch);
+                    float ahead[3], up[3];
+                    for (int i = 0; i < 3; ++i) {
+                        const float a = loadf(level + 32 + 4 * i), u = loadf(level + 16 + 4 * i);
+                        ahead[i] = a * c + u * s;
+                        up[i] = u * c - a * s;
+                    }
+                    for (int i = 0; i < 3; ++i) storef(level + 16 + 4 * i, up[i]), storef(level + 32 + 4 * i, ahead[i]);
+                }
+            }
+            // A projectile's look: ahead its way, left level, up = ahead x left.
+            const auto look = g_projectile_looks.find(effect);
+            if (look != g_projectile_looks.end() && look->second.slot && look->second.way[1] != 0) {
+                const float* a = look->second.way;
+                float left[3] = {a[2], 0, -a[0]};
+                const float n = std::sqrt(left[0] * left[0] + left[2] * left[2]);
+                if (n > 1e-3f) {
+                    left[0] /= n, left[2] /= n;
+                    const float up[3] = {a[1] * left[2] - a[2] * left[1], a[2] * left[0] - a[0] * left[2],
+                                         a[0] * left[1] - a[1] * left[0]};
+                    for (int i = 0; i < 3; ++i) {
+                        storef(level + 4 * i, left[i]);
+                        storef(level + 16 + 4 * i, up[i]);
+                        storef(level + 32 + 4 * i, a[i]);
+                    }
                 }
             }
             for (int i = 0; i < 3; ++i) storef(level + 48 + 4 * i, place[i]);
