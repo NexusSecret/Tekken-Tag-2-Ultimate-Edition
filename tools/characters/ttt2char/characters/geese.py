@@ -11,6 +11,7 @@ TEKKEN7_ID = 43
 TEKKEN7_CODE = 'mry'
 CODE = 'mry'
 SEX = 'male'
+REVISION = 1                  # his gauge and MAX mode (packs made before have his EX moves and supers free)
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
@@ -129,10 +130,15 @@ _SUPER_CANCELS_WITHOUT_CONTACT = (
     'My_ReppuuB2',
     'My_EX_Reppuu2',
 )
+# his power gauge (convert/gauge.py): three stocks of 500, his own gains (Tekken 7 sets them for him), the MAX mode
+# (activation 500: his EX moves while its timer runs) and its HUD
+GAUGE = dict(max=1500, stock=500, gain=(21, 85, 63, 255),
+             hud='/Game/UI_Common/Flash/sw_ui_hud_rage_mry/sw_ui_hud_rage_mry')
+
 MOVESET = {
     'own_moves': r'^(My_.*|Co_R_(rp00L|lp00R|crp00L|clp00R|clk00L|crk00R))$',
-    'free_meter_specials': True,
-    'free_max_mode': True,
+    # MAX mode's activation (1+2+3) also tests Tekken 7's variable 9 == 0, which none of his moves sets
+    'true_requirements': ((360, 9 << 16),),
     'buffered_special_cancels': True,
     'strict_special_cancel_gates': True,
     'buffered_normal_followups': True,

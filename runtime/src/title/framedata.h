@@ -19,5 +19,8 @@ void reset();
 enum Setting { kPanels, kPanel1P, kPanel2P, kAdvantageColours, kHitboxes, kTopCamera, kSlowMotion, kSettings };
 uint32_t setting(Setting s);
 void set_setting(Setting s, uint32_t value);
+// The right edge of the input history's column (on the left) while it
+// shows, else 0.
+float history_right();
 
 } // namespace cafe::title::framedata

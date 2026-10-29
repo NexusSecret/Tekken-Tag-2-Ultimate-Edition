@@ -148,11 +148,13 @@ class T8Extraction(unittest.TestCase):
              mock.patch.object(t8, 'saved_files', return_value=[]) as saved, \
              mock.patch.object(t8, 'whole', return_value=complete), \
              mock.patch('runpy.run_path') as run, \
+             mock.patch('setup_game.ensure_importer') as tools, \
              mock.patch.object(sys, 'argv', sys.argv[:]), \
              mock.patch.object(sys, 'path', sys.path[:]):
             if complete:
                 worker(settings, 'import', names)
                 run.assert_called_once()
+                tools.assert_called_once()
             else:
                 with self.assertRaisesRegex(RuntimeError, 'Azucena extraction is incomplete'):
                     worker(settings, 'import', names)

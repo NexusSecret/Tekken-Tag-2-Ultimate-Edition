@@ -15,13 +15,15 @@ class LocalCustomizations(unittest.TestCase):
         for name, count in expected.items():
             with self.subTest(fighter=name):
                 self.assertEqual(len(importlib.import_module('ttt2char.characters.'+name).PRESETS),count)
-    def test_free_meter_routes_remain_in_all_three_2d_fighters(self):
+    def test_meter_routes_remain_in_all_three_2d_fighters(self):
+        # they pay for them from their gauges (convert/gauge.py); Geese's EX moves need his MAX mode
         for c in (akuma,eliza,geese):
-            self.assertTrue(c.MOVESET['free_meter_specials'],c.NAME)
+            self.assertFalse(c.MOVESET.get('free_meter_specials'),c.NAME)
+            self.assertFalse(c.MOVESET.get('free_max_mode'),c.NAME)
+            self.assertEqual((c.GAUGE['max'],c.GAUGE['stock']),(1500 if c is geese else 1000,500))
         targets=set(akuma.MOVESET['special_cancels']['Mx_rp00'])
         self.assertTrue({'Ry_EX_hadoh','Ry_EXtatumaki','Ry_shoryuBEX','Ry_shinhadouken'}<=targets)
         self.assertEqual(akuma.MOVESET['special_cancels']['Ry_shoryu'],('Mx_saving_cn',))
-        self.assertTrue(geese.MOVESET['free_max_mode'])
     def test_recent_move_choices_and_assist_fixes_survive(self):
         self.assertTrue(geese.MOVESET['bounds']['My_623B2'])
         self.assertNotIn('My_623B',geese.MOVESET['bounds'])

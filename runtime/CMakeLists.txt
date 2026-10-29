@@ -68,6 +68,7 @@ add_library(cafe_runtime OBJECT
     src/gx2/surface.cpp
     src/gx2/texture.cpp
     src/title/framedata.cpp
+    src/title/gauge.cpp
     src/title/input_delay.cpp
     src/title/controllers.cpp
     src/title/practice.cpp

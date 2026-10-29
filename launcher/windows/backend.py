@@ -232,6 +232,8 @@ def worker(settings, action, names, cancelled=lambda: False):
     elif action in ('install', 'update'):
         run_command(settings.installer_command(action == 'update'), settings)
     elif action in ('import', 'remove'):
+        from setup_game import ensure_importer
+        ensure_importer(settings, run_command)
         command = settings.import_command(names, action == 'remove')
         if action == 'import':
             from ttt2char.characters import definition, game_of

@@ -1,8 +1,8 @@
 """Eliza from Tekken 7 (PC), in her default costume.
 
 Only names, paths and rules live here; every byte of her model, textures and moveset is read from the player's own
-Tekken 7 and Tekken Tag Tournament 2 files when the importer runs. Her meter (the gauge her EX moves and Super
-spend in Tekken 7) is not converted.
+Tekken 7 and Tekken Tag Tournament 2 files when the importer runs. Her EX moves, Super and cancels spend her
+gauge as in Tekken 7 (GAUGE, convert/gauge.py).
 """
 NAME = 'Eliza'
 SHORT_NAME = 'ELIZA'          # her name on the 2D screens
@@ -11,6 +11,7 @@ TEKKEN7_ID = 36               # her id in Tekken 7's roster (TKMovesets2 writes 
 TEKKEN7_CODE = 'elz'          # her code in Tekken 7's files (AkBankVoiceELZ.bnk, Item/Meshes/elz/)
 CODE = 'elz'                  # her three-letter code in the pack (not a code TTT2 already has)
 SEX = 'female'
+REVISION = 1                  # her gauge (packs made before have her EX moves free)
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
@@ -125,6 +126,10 @@ VOICE_PREFIX = 'vp'           # her intro and win lines' events in Tekken 7's ba
 # ------------------------------------------------------------------------------------------------ moveset
 # the id maps: Heihachi's moveset in both games, and her generic moves against some TTT2 fighters' (importer.py)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', 42), ('heihachi', 9), ('self', 23)]
+# her gauge (convert/gauge.py): two stocks of 500, Tekken 7's usual gains, her own HUD
+GAUGE = dict(max=1000, stock=500, gain=(50, 100, 150, 300),
+             hud='/Game/UI_Common/Flash/sw_ui_hud_rage_elz/sw_ui_hud_rage_elz')
+
 MOVESET = {
     # Match Noctis d/b+2 on counter hit only; retain normal-hit behavior.
     'counterhit_reactions': {'Vp_6rkrk': 'sDw_utuharai_r'},
@@ -162,7 +167,6 @@ MOVESET = {
     } | {'Vp_9rkrp': ('Vp_energyA', 'Vp_energyB', 'Vp_energySP', 'Vp_hadohAB'),
          'Vp_energyA': ('Vp_dash_EX',), 'Vp_energyB': ('Vp_dash_EX',)},
     'secondary_string_followups': {'Vp_4lprp': ('Vp_4lprprk',)},
-    'free_meter_specials': True,
     'noncontact_special_cancels': ('Vp_energyA', 'Vp_energyB'),
     'buffered_special_cancels': True,
     'buffered_special_timing': {

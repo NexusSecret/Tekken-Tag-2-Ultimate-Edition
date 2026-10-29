@@ -65,6 +65,7 @@
 // reactions, from the attacker's moveset).
 
 #include "title/framedata.h"
+#include "title/gauge.h"
 
 #include "gpu/overlay.h"
 #include "host/window.h"
@@ -244,6 +245,8 @@ struct Session {
     } top;
     std::vector<AttackLine> attack_lines;
     uint32_t body_hits[2][kBodySphereCount] = {}; // frames since a line crossed the sphere (from kAttackLinger + 1: none)
+    bool history_shown = false; // the input history's column as last shown
+    double panels_until = 0;   // and until when it shows
 };
 Session g;
 
@@ -727,6 +730,7 @@ constexpr float kLabelPx = 12.5f, kValuePx = 13.5f; // text heights (the font's 
 // The hint line: the title's hints' height and size (Defensive Training's at
 // x 138, y 643 to 666), the panels above it.
 constexpr float kTipY = 654.5f, kTipIcon = 23, kTipButton = 19, kTipPx = 21, kTipSide = 138, kPanelsBottom = 634;
+constexpr float kAboveGauge = 8; // (and above a 2D fighter's gauge)
 constexpr float kTipSpacing = -1.0f; // added to each glyph's advance
 constexpr uint32_t kTipOutline = 0x000000B0;
 
@@ -1134,8 +1138,15 @@ void publish(uint8_t* base, const Fighter now[2]) {
     } else {
         start_over_hitboxes();
     }
-    if (g.settings[kPanels] && g.settings[kPanel1P]) lay_out_side(l, 0, now, bottom);
-    if (g.settings[kPanels] && g.settings[kPanel2P]) lay_out_side(l, 1, now, bottom);
+    g.history_shown = history;
+    g.panels_until = seconds() + 0.25;
+    // A side's above its 2D fighter's gauge (title/gauge.cpp), when that shows.
+    const auto side_bottom = [&](int s) {
+        const float top = gauge::top(s);
+        return top ? std::min(bottom, top - kAboveGauge) : bottom;
+    };
+    if (g.settings[kPanels] && g.settings[kPanel1P]) lay_out_side(l, 0, now, side_bottom(0));
+    if (g.settings[kPanels] && g.settings[kPanel2P]) lay_out_side(l, 1, now, side_bottom(1));
     if (history) lay_out_history(l);
     // Until the next fighters' frame, and a little longer: frames can come
     // late; once they stop (the pause menu, the round left) the panels go.
@@ -1202,6 +1213,8 @@ void reset() { start_over(); }
 
 uint32_t setting(Setting s) { return g.settings[s]; }
 
+float history_right() { return seconds() < g.panels_until && g.history_shown ? kHistoryX1 : 0; }
+
 void set_setting(Setting s, uint32_t value) { g.settings[s] = s == kSlowMotion ? std::min(value, 2u) : value ? 1 : 0; }
 
 // The colour the title draws a fighter in (r3 the fighter) -> r3, four
@@ -1231,4 +1244,5 @@ PPC_FUNC(sub_04E1A0FC) {
     const uint32_t fighter = ctx.r[3];
     sub_04E1A0FC_orig(ctx, base);
     if (const uint32_t colour = cafe::title::framedata::colour(fighter)) ctx.r[3] = colour;
+    else if (const uint32_t flash = cafe::title::gauge::colour(fighter)) ctx.r[3] = flash; // (title/gauge.cpp)
 }

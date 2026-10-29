@@ -1,5 +1,5 @@
 """Character opt-ins for special inputs (the tag combos of launchers: tagcombo.py)."""
-from . import idmaps as M, tagsystem as TS
+from . import gauge as G, idmaps as M, tagsystem as TS
 from ..ttt2 import motion
 
 SEQ0 = 0x800D
@@ -53,8 +53,9 @@ def apply(c):
             target = c.k.resolve_alias(row['move_id']) if row['direction'] != M.GROUP else None
             if target is None or c.k.move_name(target) not in targets:
                 continue
-            # Keep meter-dependent EX branches out of this replacement.
-            if any(pid == ids['meter'] for pid, _ in req):
+            # Meter-dependent EX branches: kept on the runtime's gauge (GAUGE), else out of this replacement.
+            meter = next((v for pid, v in req if pid == ids['meter']), None)
+            if meter is not None and not (G.of(c.defn) and not c.defn.MOVESET.get('free_meter_specials')):
                 continue
             codes = [v for pid, v in req if pid == ids['special'] and v != 0]
             if not any(pid in ids['contact'] for pid, _ in req):
@@ -67,6 +68,8 @@ def apply(c):
                             continue
                         seen.add(key)
                         rq = c.add('requirements', dict(condition=contact, param=0))
+                        if meter is not None:
+                            c.add('requirements', dict(condition=G.AT_LEAST, param=meter))
                         c.add('requirements', dict(condition=M.END_REQ['ttt2'], param=0))
                         seq_id = c.conv_seq(inp['direction'] - SEQ0)
                         if extra_frames:
@@ -198,10 +201,13 @@ def buffered_special(c, source, targets):
     i = c.kn[source]
     rows = M.cancels(c.k, c.k.tables['moves'][i]['cancel'])
     dispatch, codes, capture_ends = [], set(), {}
+    # Tekken 7's gauge: its test kept on the runtime's id (a definition with GAUGE); with free_meter_specials left out
+    gauged = G.of(c.defn) and not c.defn.MOVESET.get('free_meter_specials')
     for row in rows:
         values = M.reqs(c.k, row['req'])
-        if row['direction'] != 0 or (not c.defn.MOVESET.get('free_meter_specials') and
-                                    any(a == ids['meter'] for a, _ in values)):
+        meter = next((b for a, b in values if a == ids['meter']), None)
+        if row['direction'] != 0 or (meter is not None and not c.defn.MOVESET.get('free_meter_specials') and
+                                     not gauged):
             continue
         target = c.k.resolve_alias(row['move_id'])
         if c.k.move_name(target) not in targets:
@@ -216,8 +222,10 @@ def buffered_special(c, source, targets):
             allowed = {346, 49, 50, 353, 0x81c8, 0x8069, 0x8068}
             if c.defn.MOVESET.get('free_meter_specials'):
                 allowed.add(629)
-            if c.defn.MOVESET.get('free_max_mode'):
+            if c.defn.MOVESET.get('free_max_mode') or gauged:
                 allowed.add(176)
+            if gauged:
+                allowed.add(629)
             if any(a not in allowed or (a in (49, 50, 176) and b != 0)
                    or (a == 353 and b != 1) for a, b in values):
                 raise ValueError('unsupported special dispatch gates: ' + source)
@@ -226,6 +234,10 @@ def buffered_special(c, source, targets):
         checks = [(SPECIAL_VAR, code)]
         if contact is not None:
             checks.append((CONTACT_VAR, 1))
+        if meter is not None and gauged:
+            checks.append((G.AT_LEAST, meter))
+        if (176, 0) in values and gauged and c.game == 't7':     # Geese's MAX mode
+            checks.append((G.MAX_ON, 0))
         dispatch.append(dict(row, req=req(checks),
                              extradata=extra(0x182), move_id=c.newidx[target],
                              win_end=min(32767, row['win_end'] + late), start_frame=1, option=0))
@@ -240,7 +252,7 @@ def buffered_special(c, source, targets):
             continue
         if c.defn.MOVESET.get('strict_special_cancel_gates'):
             allowed = {346, 0x80c5, 0x822b}
-            if c.defn.MOVESET.get('free_max_mode'):
+            if c.defn.MOVESET.get('free_max_mode') or gauged:
                 allowed.add(176)
             if any(a not in allowed or (a in (346, 176) and b != 0)
                    or (a == 0x822b and b != 1) for a, b in values):
@@ -255,8 +267,9 @@ def buffered_special(c, source, targets):
                 c.cache[key] = c.add('input_sequences', dict(
                     original, window=max(original['window'], motion_window)))
             sequence = c.cache[key]
+        max_mode = [(G.MAX_ON, 0)] if (176, 0) in values and gauged and c.game == 't7' else []
         captures.append(dict(row, direction=SEQ0 + sequence if is_sequence else row['direction'],
-                             req=req([(SPECIAL_VAR, 0), (SPECIAL_SET, code)]),
+                             req=req([(SPECIAL_VAR, 0)] + max_mode + [(SPECIAL_SET, code)]),
                              extradata=extra(0x2800), move_id=0x8001,
                              # A few strings capture well before dispatch;
                              # allow late motions throughout the dispatch window.
@@ -515,17 +528,24 @@ def restore_jump_specials(c):
                 raise ValueError('missing T7 air gate: ' + name)
             if any(a not in (ids['meter'],) + ids['jump_air'] + (ids['jump_arc'],) for a, _ in values):
                 raise ValueError('unsupported jump special gate: ' + name)
-            if any(a == ids['meter'] for a, _ in values) and not c.defn.MOVESET.get('free_meter_specials'):
+            meter = next((b for a, b in values if a == ids['meter']), None)
+            gauged = G.of(c.defn) and not c.defn.MOVESET.get('free_meter_specials')
+            if meter is not None and not c.defn.MOVESET.get('free_meter_specials') and not gauged:
                 continue
             if not SEQ0 <= row['direction'] < SEQ0 + len(c.k.tables['input_sequences']):
                 raise ValueError('missing jump special input sequence: ' + name)
             # Original order prefers EX for 3+4; rising/falling branches share
-            # inputs. Keep one route per command, rather than overlapping it.
-            key = row['direction'], row['button']
+            # inputs. Keep one route per command, rather than overlapping it
+            # (and per gauge test: a gauged EX route falls back to the plain one).
+            key = row['direction'], row['button'], meter if gauged else None
             if key in seen:
                 continue
             seen.add(key)
-            empty = c.add('requirements', dict(condition=M.END_REQ['ttt2'], param=0))
+            if meter is not None and gauged:
+                empty = c.add('requirements', dict(condition=G.AT_LEAST, param=meter))
+                c.add('requirements', dict(condition=M.END_REQ['ttt2'], param=0))
+            else:
+                empty = c.add('requirements', dict(condition=M.END_REQ['ttt2'], param=0))
             delta = move['airborne_end'] - original['airborne_end']
             start = max(row['win_start'], move['airborne_start'])
             end = min(row['win_end'] + delta, move['airborne_end'] - 1)
