@@ -92,6 +92,8 @@ def verified_rpx(root, expected):
 
 def prepare_rpx(settings, run):
     source_text = settings.values['source'] or settings.values['title']
+    if (not source_text or not Path(source_text).exists()) and settings.installed():
+        source_text = str(settings.installed() / 'game')   # (an update: the installed game has it too)
     if not source_text or not Path(source_text).exists():
         raise ValueError('Choose your European Wii U game archive with update v16 first.')
     source = Path(source_text)
@@ -130,6 +132,22 @@ def validate_setup_paths(settings):
     if windows_length(tools) > MAX_TOOLS_PATH:
         raise ValueError('The Windows tools folder path is too long. Choose a shorter tools folder '
                          'in Paths, or use a fresh project copy in D:/TTT2. Current tools: ' + str(tools))
+    # The game's installer gets its source and folder in the ANSI code page: a letter it has not is lost.
+    from backend import unreadable_letters
+    for what, key in (('installation folder', 'install'), ('Wii U archive', 'source')):
+        if letters := unreadable_letters(settings.values.get(key) or ''):
+            raise ValueError('The %s path has letters the game\'s installer cannot be given on this PC (%s). Choose one '
+                             'whose path has only plain letters, such as C:/Games/TTT2. Current %s: %s'
+                             % (what, letters, what, settings.values[key]))
+    # CMake runs some build steps through batch files it writes in UTF-8, which cmd.exe reads in the console's
+    # code page (850 on an Italian Windows): a letter such as à in the path breaks them ("path not found").
+    for what, path in (('project folder', settings.root), ('Windows tools folder', tools)):
+        if not str(path).isascii():
+            letters = ''.join(sorted({c for c in str(path) if not c.isascii()}))
+            raise ValueError('The %s path has letters the Windows build tools cannot read (%s). Extract a fresh copy '
+                             'into a folder whose path has only plain letters, such as C:/TTT2 (outside OneDrive), '
+                             'then start setup again; or use Ultimate_Launcher-x86_64.exe, which keeps its files in '
+                             'such a folder by itself. Current %s: %s' % (what, letters, what, path))
 
 
 def setup(settings, run):
@@ -139,6 +157,28 @@ def setup(settings, run):
         raise ValueError('Choose your Wii U game source and installation folder first.')
     if settings.build != settings.root / 'build-windows-tools':
         raise ValueError('First-time setup requires the project build-windows-tools folder.')
+    build_game(settings, run)
+    print('@step install Installing the game', flush=True)
+    # The project already has its launcher entry point. Do not require writing
+    # a system/desktop shortcut to finish a portable first-time setup.
+    run(settings.installer_command() + ['--no-launcher'], settings)
+    print('Setup complete. You can now click Play.', flush=True)
+
+
+def upgrade(settings, run):
+    """The installed game built again from this launcher's files and put in its place: after the
+    launcher updated itself, as the Linux launcher's Update."""
+    if not settings.installed(): raise ValueError('Set up the game first.')
+    if settings.build != settings.root / 'build-windows-tools':
+        raise ValueError('Updating the game requires the project build-windows-tools folder.')
+    build_game(settings, run)
+    print('@step install Updating the installed game', flush=True)
+    run(settings.installer_command(True), settings)
+    print('The game is updated. You can now click Play.', flush=True)
+
+
+def build_game(settings, run):
+    """Everything up to the built game: the tools, the libraries, the code from the player's RPX."""
     validate_setup_paths(settings)
     print('@step tools Getting the missing Windows tools ready', flush=True)
     tools = ensure_tools(settings, run)
@@ -154,8 +194,3 @@ def setup(settings, run):
     print('@step build Building the Windows game', flush=True)
     run(powershell(settings.root / 'tools/build_windows_runtime.ps1', '-ToolsRoot', tools,
                    '-Rpx', rpx), settings)
-    print('@step install Installing the game', flush=True)
-    # The project already has its launcher entry point. Do not require writing
-    # a system/desktop shortcut to finish a portable first-time setup.
-    run(settings.installer_command() + ['--no-launcher'], settings)
-    print('Setup complete. You can now click Play.', flush=True)

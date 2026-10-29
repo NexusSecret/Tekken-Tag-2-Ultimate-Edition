@@ -62,6 +62,19 @@ class PathPreflight(unittest.TestCase):
     def test_custom_tools_path_is_checked_separately(self):
         with self.assertRaisesRegex(ValueError,'tools folder path'):
             validate_setup_paths(self.settings(tools='D:/'+'x'*160))
+    def test_letters_cmd_cannot_read_are_rejected(self):
+        # (A tester's: CMake's batch files lost the à, "path not found".)
+        root='C:/Users/Player/Desktop/Novit\u00e0/Tekken-Tag-2-Ultimate-Edition-dev-0-4-0'
+        with self.assertRaisesRegex(ValueError, 'project folder path has letters .*\\(\u00e0\\).*C:/TTT2'):
+            validate_setup_paths(self.settings(root, tools='C:/TTT2/local/windows-tools'))
+        with self.assertRaisesRegex(ValueError, 'Windows tools folder path has letters'):
+            validate_setup_paths(self.settings(tools='C:/Users/Jos\u00e9/tools'))
+    def test_install_folder_the_installer_cannot_be_given(self):
+        settings=self.settings(); settings.values.update(install='C:/\u6e38\u620f', source='C:/TTT2.wua')
+        with self.assertRaisesRegex(ValueError, 'installation folder path has letters'):
+            validate_setup_paths(settings)
+        settings.values['install']='C:/Users/Player/Desktop/Novit\u00e0/TTT2'
+        validate_setup_paths(settings)
     def test_windows_utf16_length_is_used(self):
         with self.assertRaisesRegex(ValueError,'project folder path'):
             validate_setup_paths(self.settings(root='D:/'+'\U0001f600'*55))

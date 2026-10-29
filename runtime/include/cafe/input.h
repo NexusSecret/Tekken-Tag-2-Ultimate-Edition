@@ -1,9 +1,11 @@
 #pragma once
 
-// Host-side GamePad state, set by the window/input layer and read by the
-// game through VPADRead.
+// Host-side controller states, set by the window/input layer and read by the
+// game: the GamePad's through VPADRead, the Pro Controllers' through KPAD.
 
+#include <array>
 #include <cstdint>
+#include <optional>
 
 namespace cafe::os {
 
@@ -30,6 +32,11 @@ struct GamepadState {
 
 void set_gamepad_state(const GamepadState& state);
 
+// The Pro Controllers on KPAD's channels 0-3 (buttons by the GamePad's bits);
+// a channel without a state has none connected.
+constexpr int kProControllers = 4;
+void set_pro_controller_states(const std::array<std::optional<GamepadState>, kProControllers>& states);
+
 // - (Select) pressed together with another button, for a mode that gives the
 // chord a meaning of its own (title/practice.cpp: Practice's position reset).
 // The mode arms it on every frame the chord can happen, saying whether the
@@ -39,5 +46,14 @@ void set_gamepad_state(const GamepadState& state);
 // for each chord.
 void arm_select_chord(bool partner_held);
 bool take_select_chord();
+
+// Stepped input, for a game that runs its frame every `every` reads of the
+// pad only (title/practice.cpp: Practice's slow motion): the game sees the
+// pad change on every `every`-th read, with whatever was pressed since
+// (a press made and let go in between counts as held for that read); the
+// reads in between show it as it was. 1: every read, as usual.
+// input_step_delivered() says whether the last read was one that changed.
+void set_input_step(uint32_t every);
+bool input_step_delivered();
 
 } // namespace cafe::os

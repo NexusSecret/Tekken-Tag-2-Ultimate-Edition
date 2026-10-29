@@ -232,6 +232,19 @@ void test_status() {
           "owned: answer");
     check(parse_owned(R"({"error": "Steam is not running"})").error == "Steam is not running", "owned: error");
     check(!parse_owned("garbage").error.empty() && !parse_owned("{}").error.empty(), "owned: malformed");
+
+    const MainNews news = parse_main_news(R"({"ahead": 3, "head": "f434935", "page": "https://github.com/x/compare",
+        "changes": ["Newest", "Older"], "fighters": ["kazumi"], "new": [{"name": "jin", "display": "Jin Kazama"}]})");
+    check(news.error.empty() && news.ahead == 3 && news.head == "f434935" && news.changes.size() == 2 &&
+              news.changes[0] == "Newest" && news.fighters == std::vector<std::string>{"kazumi"} &&
+              news.fresh.size() == 1 && news.fresh[0].second == "Jin Kazama",
+          "main news: answer");
+    check(parse_main_news(R"({"error": "GitHub does not know commit abc"})").error == "GitHub does not know commit abc",
+          "main news: error");
+    check(!parse_main_news("[]").error.empty() && parse_main_news("{}").ahead == 0, "main news: malformed or empty");
+    check(build_commit("0.4.0-1cab8c68f39b") == "1cab8c68f39b" && build_commit("0.4.0").empty() &&
+              build_commit("0.4.0-dirty").empty() && build_commit("").empty(),
+          "build commit");
 }
 
 void test_saved_ownership(const fs::path& root) {

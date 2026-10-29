@@ -1,11 +1,39 @@
 """Windows launcher backend; GTK/Linux code and character conversion stay shared."""
 from pathlib import Path
+import collections
+import glob
 import json
 import os
+import re
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
+# The game's programs (built with llvm-mingw's libc++) print and write paths in this PC's ANSI code page: the
+# installer's "@folder" line and its record of the folder (%LOCALAPPDATA%\TTT2Ultimate\installed). (cp1252 off
+# Windows: tests.)
+ANSI = 'mbcs' if os.name == 'nt' else 'cp1252'
+
+
+def decoded(data):
+    """Bytes a program wrote: UTF-8, else (an à in a path, say) the ANSI code page."""
+    try:
+        return data.decode('utf-8')
+    except UnicodeDecodeError:
+        return data.decode(ANSI, 'replace')
+
+
+def unreadable_letters(path):
+    """The letters of `path` the game's programs cannot be given (they get their arguments in the ANSI code page)."""
+    return ''.join(sorted({c for c in str(path) if not c.isascii() and not _ansi(c)}))
+
+
+def _ansi(letter):
+    try:
+        letter.encode(ANSI, 'strict')
+        return True
+    except UnicodeEncodeError:
+        return False
 
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -22,7 +50,7 @@ class Settings:
         data = self.root / 'local/windows-userdata/TTT2Ultimate'
         if not data.exists(): data = local
         def first(path):
-            return path.read_text(encoding='utf-8').splitlines()[0] if path.is_file() and path.stat().st_size else ''
+            return decoded(path.read_bytes()).splitlines()[0] if path.is_file() and path.stat().st_size else ''
         tools = ''
         cache = self.build / 'CMakeCache.txt'
         if cache.exists():
@@ -31,10 +59,20 @@ class Settings:
                     tools = str(Path(line.split('=', 1)[1]).parent.parent.parent)
         title = self.root / 'local/wua-game/0000000000000000_v0'
         saves = self.root / 'local/windows-save'
+        recorded = first(local / 'installed')
         self.values = dict(source=first(self.build / 'ttt2-game.txt'), title=str(title) if title.exists() else '',
-                           install=first(local / 'installed'), data=str(data), packs=str(data / 'characters'),
+                           install=recorded, data=str(data), packs=str(data / 'characters'),
                            saves=str(saves if saves.exists() else data / 'save'), tools=tools or str(self.root / 'local/windows-tools'))
         if self.file.exists(): self.values.update(json.loads(self.file.read_text(encoding='utf-8')))
+        if not self.installed(): self.values['install'] = self.found_install(recorded) or self.values['install']
+
+    def found_install(self, recorded):
+        """The install the setting misses: the installer's record of its folder, else the folder the setting names
+        with the letters a launcher read wrongly (an à became U+FFFD); '' when neither is one."""
+        candidates = [recorded] if recorded else []
+        if '\ufffd' in self.values['install']:
+            candidates += sorted(glob.glob(glob.escape(self.values['install']).replace('\ufffd', '?')))
+        return next((c for c in candidates if (Path(c) / '.ttt2-install').is_file()), '')
 
     def save(self):
         if Path(self.values['data']).name != 'TTT2Ultimate':
@@ -98,34 +136,99 @@ class Settings:
                 *(['--remove'] if remove else [])]
 
 
+def failure(lines):
+    """What a failed command's last lines say went wrong, for the task panel: the checks ctest names as failed,
+    else the build's first error; '' when they say neither."""
+    for i, line in enumerate(lines):
+        if line.startswith('The following tests FAILED:'):
+            failed = []
+            for listed in lines[i + 1:]:
+                found = re.match(r'\s*\d+ - (\S+) \((.+)\)\s*$', listed)
+                if not found: break
+                failed.append(found.group(1) + ('' if found.group(2) == 'Failed' else ' (%s)' % found.group(2)))
+            if failed: return 'Failed check%s: %s.' % ('' if len(failed) == 1 else 's', ', '.join(failed))
+    for line in lines:
+        if ': error: ' in line or ': fatal error: ' in line:
+            text = line.strip()
+            return 'Build error: ' + (text if len(text) <= 300 else text[:297] + '...')
+    return ''
+
+
 def run_command(command, settings):
     print('Starting:', subprocess.list2cmdline(command), flush=True)
+    last = collections.deque(maxlen=400)
     with subprocess.Popen(command, cwd=settings.root, env=settings.environment(), stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, encoding='utf-8', errors='replace',
-                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)) as process:
+                          stderr=subprocess.STDOUT, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)) as process:
         try:
-            for line in process.stdout:
-                print(line, end='', flush=True)
+            for data in process.stdout:
+                line = decoded(data).rstrip('\r\n')
+                print(line, flush=True)
+                last.append(line)
                 if line.startswith('@folder '):
                     settings.values['install'] = line[8:].strip(); settings.save()
             result = process.wait()
         except BaseException:
             process.terminate(); process.wait(); raise
-    if result: raise RuntimeError('Task exited with code %d; see the log above.' % result)
+    if result:
+        # (Said in the task panel too: what a tester sends when it is all that is seen.)
+        if why := failure(list(last)): print('@error ' + why, flush=True)
+        raise RuntimeError('Task exited with code %d; see the log above.' % result)
 
 
-def worker(settings, action, names):
+def built_by(settings):
+    """The launcher version whose files built the game in the build folder, with a test build's commit
+    (self_update.files_id; '' when unknown)."""
+    file = settings.build / 'ttt2-launcher-version.txt'
+    return file.read_text(encoding='utf-8').strip() if file.is_file() else ''
+
+
+def installed_by(settings):
+    """The launcher version whose files built the installed game, as built_by ('' when unknown)."""
+    file = settings.build / 'ttt2-installed-version.txt'
+    return file.read_text(encoding='utf-8').strip() if file.is_file() and settings.installed() else ''
+
+
+def importer(settings, *args, timeout=None):
+    """The character importer's answer for the launcher (tools/characters/launcher.py), as for the
+    Linux launcher: status (what is there) or owned (which DLC Steam says is owned)."""
+    command = [sys.executable, '-u', str(settings.root / 'tools/characters/launcher.py'), *args]
+    if args[0] == 'status' and settings.installed(): command += ['--game', str(settings.installed())]
+    result = subprocess.run(command, cwd=settings.root, env=settings.environment(), capture_output=True, text=True,
+                            encoding='utf-8', errors='replace', timeout=timeout,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        lines = [line for line in result.stderr.splitlines() if line.strip()]
+        raise RuntimeError(lines[-1] if lines else 'the importer ended with code %d' % result.returncode)
+
+
+def worker(settings, action, names, cancelled=lambda: False):
     os.environ.update(settings.environment())
     sys.path[:0] = [str(settings.root / 'local/windows-python'), str(settings.root / 'tools/characters'), str(Path(settings.values['tools']) / 'python')]
     if action == 'setup':
         from setup_game import setup
         setup(settings, run_command)
+    elif action == 'upgrade':
+        from setup_game import upgrade
+        upgrade(settings, run_command)
     elif action == 'build':
         tools = Path(settings.values['tools'])
         if not (tools / 'python/cmake/data/bin/cmake.exe').is_file():
             raise ValueError('Select the Windows build tools folder in Paths first.')
         run_command(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
                      str(settings.root / 'tools/build_windows_runtime.ps1'), '-ToolsRoot', str(tools)], settings)
+    elif action == 'launcher':
+        import self_update
+        exe = self_update.running_exe()
+        if not exe: raise ValueError('Only the release .exe updates itself, and this launcher was not opened from one.')
+        self_update.update(exe, cancelled)
+    elif action == 'files':
+        import self_update
+        branch = self_update.test_branch(settings.root)
+        if not self_update.running_exe() or not branch:
+            raise ValueError('Only a test build\'s .exe updates its files from its branch, and this launcher is not one.')
+        self_update.update_files(settings.root, branch, cancelled)
     elif action in ('install', 'update'):
         run_command(settings.installer_command(action == 'update'), settings)
     elif action in ('import', 'remove'):
@@ -147,18 +250,9 @@ def worker(settings, action, names):
         sys.argv = command[2:]
         runpy.run_path(command[2], run_name='__main__')
     else: raise ValueError('Unknown task: ' + action)
-
-
-def fighters(settings):
-    sys.path.insert(0, str(settings.root / 'tools/characters'))
-    from ttt2char.characters import CHARACTERS, definition, game_of
-    from ttt2char import pack
-    loaded = {p['code']: p for _, p in pack.loaded(pack.installed(settings.values['packs']))}
-    rows = []
-    for name in CHARACTERS:
-        d = definition(name); found = loaded.get(d.CODE); state = 'Not added'
-        if found:
-            state = 'Update available' if found['revision'] < pack.revision(d) else 'Added'
-            if found.get('stand_in'): state = 'Stand-in moves: reimport'
-        rows.append((name, d.NAME, 'Tekken 8' if game_of(d) == 'tekken8' else 'Tekken 7', state))
-    return rows
+    import self_update
+    if action in ('setup', 'build', 'upgrade'):
+        (settings.build / 'ttt2-launcher-version.txt').write_text(self_update.files_id(settings.root) + '\n',
+                                                                 encoding='utf-8')
+    if action in ('setup', 'install', 'update', 'upgrade') and built_by(settings):
+        (settings.build / 'ttt2-installed-version.txt').write_text(built_by(settings) + '\n', encoding='utf-8')

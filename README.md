@@ -48,8 +48,30 @@ and shaders are translated to Vulkan as it runs.
   title screen's logo says "Ultimate Edition" where it said "Wii U
   Edition", in the same brush lettering. All of it is made by the port
   from the Wii U game's own files.
+- **Local multiplayer**: in VS Battle, Team Battle and Pair Play every
+  keyboard or gamepad that presses Start joins as a player of its own, up
+  to five, and the player entry screen pictures the keyboard, PlayStation,
+  Xbox-style or Nintendo controller each player holds, drawn in the game's
+  style. Everywhere else every device plays as the one player.
 - **Position reset in Practice**, as in Tekken 8: 3 and − (Select) pressed
-  together put both fighters back where the stage put them.
+  together put both fighters back where the stage put them; a hint at the
+  bottom right of the screen says so, in the look of the game's own.
+- **Frame data in Practice**, as in Tekken 8: a panel for each player at the
+  bottom of the screen shows the damage of their hits and combos, the hit
+  level, startup and active frames of their last attack, frame advantage
+  after a hit or block, counter hits, punishes and wall hits, posture and
+  distance. The pause menu's ULTIMATE SETTINGS submenu (in place of TOUCH
+  SELECT) sets them up, and can colour the fighters by frame advantage after
+  a hit or block (blue ahead, red behind).
+- **Hitboxes and a view from above in Practice**: the fighters' bodies as
+  the game tests hits against them, in 3D, and their attacks' hit lines,
+  with the parts an attack reaches lit red; a window shows the fight from
+  above as well, to see what a sidestep avoids; slow motion at half or a
+  quarter speed.
+- **Input history in Practice**, as in Tekken 8: COMMAND HISTORY (on from
+  the start of each Practice session) shows the player's inputs in a column
+  on the left, newest on top, each with the frames it was held, in place of
+  the game's bar along the bottom.
 - **No forced input delay**: the Wii U game waits two frames (33 ms) after
   reading a button before acting on it, in every mode (Cemu's "Reduce input
   lag" graphic pack removes it too). The port leaves that wait out; the
@@ -140,9 +162,51 @@ dumps from the debugging options under `local/` too.
 
 ### Windows launcher
 
+**Starting from a release (Windows 10/11, x64):**
+
+1. Download `Ultimate_Launcher-x86_64.exe` from the newest release and put it
+   in a folder of yours (not Program Files: it replaces itself when it updates).
+2. Double-click it. The first start unpacks the launcher's files into
+   `%LOCALAPPDATA%\TTT2Ultimate\launcher` and gets its private Python ready
+   in a console window; later starts open the launcher at once. (When that
+   path has letters beyond plain ASCII, as a user name such as José gives it,
+   the files go to `%PUBLIC%\TTT2Ultimate\launcher` instead: see below.)
+3. Continue with **Set Up Game** as in step 3 below. The tools, the build
+   and the generated code stay in that folder too (plan its 30 GB on that drive).
+
+The release launcher updates itself. When it starts (and when its window is
+back in front after six hours) it asks GitHub for this repository's newest
+release; when that is newer, a notice at the top of the window says so, with
+**What's New** (the release's page) and **Update**, and the button at the
+top right says **Update to** its version (that button also looks for an update
+any time). Update downloads the new `.exe` beside the one you started, checks
+it (its size, GitHub's SHA-256, that it is a 64-bit Windows launcher and says
+it is that version), puts it in that one's place and opens it: it unpacks its
+files over the old ones, keeping everything else there. Anything failing, or
+Cancel, leaves the `.exe` as it was. A game an older version built gets
+**Update** beside Play, which builds it again on this PC with the new version's
+changes. The launcher also says when `main` has newer changes than its release,
+as the Linux launcher does (below).
+
+A test build (an `.exe` made on a branch other than `main`, for testers) follows
+its branch instead: when the branch has newer commits, the notice says so with
+**Update**, which downloads the newest commit's files from GitHub, puts them in
+place of the ones the `.exe` unpacked and opens the launcher again: a fix pushed
+to the branch reaches testers without a new `.exe`. A game built from older
+files then gets **Update** beside Play. One stopped half-way is unpacked again
+from the `.exe` when it is next started.
+
+When Set Up Game or Update fails, the task panel names the checks that failed or
+the build's first error; **Open Log** there opens the whole log.
+
 **Starting from a downloaded project ZIP (Windows 10/11, x64):**
 
-1. Download this branch as a ZIP and **Extract All** into a writable folder.
+1. Download this branch as a ZIP and **Extract All** into a writable folder
+   whose path has only plain letters and is short, such as `C:\TTT2`: not in
+   OneDrive (30 GB would be synced). Set Up Game refuses a path with letters
+   such as à: CMake runs some build steps through batch files it writes in
+   UTF-8, which `cmd.exe` reads in the console's code page, so such a letter
+   turns into others and the step finds no folder.
 2. Double-click **Start Ultimate Launcher.cmd** in that folder. The first start
    downloads and verifies a private Python/Tk runtime. No Python installation,
    Git installation, terminal commands or second project download are needed.
@@ -168,11 +232,17 @@ paths are unchanged. The ZIP startup path obtains private Python/Tk automaticall
 can also use an installed Python 3 with Tcl/Tk. Setup obtains numpy and Pillow. Set `TTT2_PYTHON`
 to a Python executable to override automatic discovery.
 
-The Windows interface provides Play, Build/Rebuild, Install, Update installed game,
-individual fighter import/update/removal (including Reina), selectable game/data/
-pack/save/tool paths, display settings, a keyboard.ini editor, import cancellation,
-and persistent task/game logs. It calls the existing Windows build scripts,
-native installer, and shared character importer. Set Up Game prepares the build tools automatically from the extracted project.
+The Windows interface looks and behaves as the Linux launcher: one page with the
+game (Play, Settings, Update when the launcher's version is newer than the game's)
+and its characters as the shared importer finds them (Tekken 7, Tekken 8 and Steam;
+Add, Update and Remove per fighter, Add All, the DLC with what Steam says you own),
+a Settings page (fullscreen, resolution, 120 fps, input delay, and the keyboard's
+keys chosen by pressing them, as the Linux launcher writes keyboard.ini), and the
+task panel below with its progress, Cancel and Details. Windows' own parts stay:
+Set Up Game, the More menu (Build / Rebuild, Install from Wii U Source, Update
+Installed Game, the logs) and the Folders in Settings. It calls the existing Windows
+build scripts, native installer, and shared character importer, and needs nothing
+beyond the Python with Tk it gets itself. Set Up Game prepares the build tools automatically from the extracted project.
 Keep the project folder for rebuilds. The compiled launcher executable can also
 be opened from its build folder after setup.
 
@@ -186,10 +256,12 @@ marked **Update available** still load: this compares revisions from the shared
 importer and never automatically rebuilds anything.
 
 Task/game logs are saved under the selected data folder's `logs/` directory;
-startup errors are saved beside the executable in `launcher.log`. Build/install
+startup errors are saved beside the executable in `launcher.log` (the release
+`.exe`'s in `local/launcher.log` of its folder in `%LOCALAPPDATA%`). Build/install
 tasks finish before the window closes. Import cancellation requests cleanup and
-keeps completed extraction data. This frontend does not implement AppImage
-self-updates, the GTK key-capture screen, or the Linux uninstall interface.
+keeps completed extraction data. Only the release `.exe` updates itself (a
+project ZIP is updated as a whole); this frontend does not implement the GTK
+key-capture screen or the Linux uninstall interface.
 
 
 `ttt2-launcher` (**Ultimate Launcher**) does the installing and
@@ -256,9 +328,38 @@ window says so, with **What's New** (the release's page) and **Update**,
 and the button left of Check Again is highlighted (that button also looks
 for an update any time). Update downloads the new AppImage (with curl or
 wget), checks it, puts it in place of the AppImage you started and opens it. A release is tagged `v<version>` (`v0.1.1`) with
-the AppImage attached, built with that version as `TTT2_LAUNCHER_VERSION` in
-`launcher/builder/CMakeLists.txt`: before it replaces anything the launcher
+the AppImage and the Windows launcher attached, both built with that version as `TTT2_LAUNCHER_VERSION` in
+`launcher/builder/CMakeLists.txt`: before it replaces anything each launcher
 checks that the new one says it is that version (`ttt2-launcher --version`).
+
+Both launchers also say when `main` has changes their build lacks, before a
+release brings them: each knows the commit it was built from (Git's, when it is
+built; the Windows `.exe` keeps it in its files) and asks GitHub, with the release,
+what `main` has beyond it (`tools/characters/launcher.py main`). The notice then
+says how many changes and the newest one, with **What's New** (GitHub's
+comparison); fighters `main` gives a newer pack show **Newer on main**, and
+fighters only `main` has are named. All of it comes with the next release. A
+build of commits never pushed shows nothing.
+
+The Windows launcher of a release is made on Linux too, from a commit:
+
+```bash
+python3 launcher/windows/make_launcher_exe.py Ultimate_Launcher-x86_64.exe
+```
+
+It is `launcher/windows/entry.cpp` compiled with MinGW-w64
+(`x86_64-w64-mingw32-g++` and its `windres`; `--cxx` names another), with the
+project's tracked files (nothing of the game) as a resource of the program, and
+its icon and version details (the icon needs `rsvg-convert`). `--stub` takes a
+launcher CMake built for Windows instead and appends the files to it (tests).
+Made on a branch other than `main`, it is a test build, which updates its files
+from that branch (above); a release is made on `main`.
+The files are a resource rather than data after the program because virus
+scanners' guesses take that for a dropper's payload less often; the `.exe` is
+not code-signed, so Windows Defender may still flag a new build by guess
+(`…!ml`): report it to Microsoft as a false positive. Attach it to the release
+as it is named here: each launcher takes its own file from a release
+(`.AppImage`, `.exe`).
 
 ## Playing
 
@@ -319,12 +420,74 @@ keyboard) confirms and the right one goes back, except with a Nintendo
 controller, which confirms with its A as on the Wii U. The icons follow the
 last controller used (the keyboard counts as a neutral one).
 
+For one player, the keyboard and all gamepads control the game together,
+so any of them can be picked up at any time. VS Battle and Pair Play can be
+chosen once two devices are connected (the keyboard and a gamepad, or two
+gamepads). VS Battle, Team Battle and Pair Play start on the player entry
+screen ("Press the controller's +"):
+there each player presses Start (Enter on the keyboard) on their own
+device, the first one joining as the Wii U's GamePad and the others as Pro
+Controllers, and from then on each device plays only for its player, as
+on the console. Back in the menus every device controls the game together
+again.
+
 In Practice, 3 (left kick: by default K, or a gamepad's bottom button) and
-+ (Start: Enter) pressed together, in either order, put both fighters back
-where the stage put them, standing, as Tekken 8's position reset does; the
-pause menu's POSITION SETTINGS apply as at the start of training. 3 is
-whichever button the game's Controller Setup gives left kick. + alone
-still opens the pause menu, a few frames later than before.
+− (Select: Backspace) pressed together, in either order, put both fighters
+back where the stage put them, standing, as Tekken 8's position reset does;
+the pause menu's POSITION SETTINGS apply as at the start of training. 3 is
+whichever button the game's Controller Setup gives left kick. − alone still
+reaches the game, a few frames later than before.
+
+Practice's pause menu has ULTIMATE SETTINGS where the Wii U had TOUCH
+SELECT (the GamePad's touch-screen moves, which a computer has no use for,
+and which stopped the game with an added fighter): a submenu like the
+game's own, to show or hide the frame data panels (FRAME DATA) and each
+player's (1P PANEL, 2P PANEL), all on to begin with, and, off to begin
+with:
+- ADV. COLORS: as in Tekken 8, from a hit or block until both fighters can
+  act again, the fighter ahead in frames turns blue and the one behind red.
+- HITBOXES: each fighter's body as the game sees it when it tests a hit,
+  the 14 spheres it puts on the fighter's bones every frame, drawn in 3D
+  (1P's cyan, 2P's yellow, through the fighters), and the lines an attack
+  tests against them on its active frames (red, in front of everything,
+  fading over a third of a second). A sphere an attack's line crosses turns
+  red: that is what the hit reached. Added fighters show theirs the same
+  way.
+- TOP CAMERA: a window between the panels shows the fight from straight
+  above, the game itself rendered a second time from there, while the main
+  camera stays as it is: the fighters' line across it, 1P's end on the
+  left, high enough for both. With HITBOXES on they show in it too, so
+  whether an attack's line reaches across a sidestep shows directly. It
+  costs a second rendering of each frame while it is on; only what the
+  game's own camera could see is drawn in it.
+- SLOW MOTION: OFF, 1/2 or 1/4 speed, as in Smash Bros.' training mode:
+  the fight steps its frames at that rate (the same picture shown in
+  between), and every button pressed meanwhile still counts. The pause
+  menu keeps its speed.
+
+2P's panel has a red tint.
+
+The frame data panels show, for each player: **Total Damage** dealt since
+the round started (or the last position reset), the best combo's damage, the
+last attack's hit level (High, Mid, Low, S.Low), the last hit's damage with
+the game's multiplier (as its own DAMAGE display: 120% for a solo fighter,
+more on a counter hit) and how much of it is recoverable, and whether it was
+a counter hit, a punish (a hit during the recovery of the opponent's
+attack) or hit the opponent into a wall, as the game's own COUNTER, PUNISH
+and WALL HIT texts say, for the whole combo; then the attack's startup
+and active frames, the frame advantage after the last hit or block, as it
+lands (green for the side ahead, red for the side behind; "KND" when the
+hit knocked the opponent down), the posture and the distance between the
+fighters in metres. Total Damage and the best combo start over on the
+position reset. They move up above the game's DAMAGE INFO 2 bars when those
+are on, and are not shown in the pause menu.
+
+COMMAND HISTORY (in the pause menu's ADVANCED SETTINGS → HUD Information)
+shows the player's inputs as Tekken 8's Practice does: a column on the left
+side of the screen, the newest input on top, each row a direction (as the
+fighter faces) and the buttons held, drawn with the game's own icons, and
+the number of frames it was held. It replaces the game's command history
+bar along the bottom.
 
 The launcher's **Settings** also choose how the game starts: fullscreen or
 in a window, the resolution it draws at (Automatic, the default, is enough

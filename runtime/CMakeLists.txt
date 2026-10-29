@@ -39,6 +39,7 @@ add_library(cafe_runtime OBJECT
     src/gpu/command_processor.cpp
     src/gpu/display.cpp
     src/gpu/null_backend.cpp
+    src/gpu/overlay.cpp
     src/gpu/replacements.cpp
     src/gpu/shader_dump.cpp
     src/gpu/tiling.cpp
@@ -46,6 +47,7 @@ add_library(cafe_runtime OBJECT
     src/gpu/vulkan/draw.cpp
     src/gpu/vulkan/formats.cpp
     src/gpu/vulkan/interpolate.cpp
+    src/gpu/vulkan/overlay.cpp
     src/gpu/vulkan/present.cpp
     src/gpu/vulkan/png.cpp
     src/gpu/vulkan/renderer.cpp
@@ -65,7 +67,9 @@ add_library(cafe_runtime OBJECT
     src/gx2/state.cpp
     src/gx2/surface.cpp
     src/gx2/texture.cpp
+    src/title/framedata.cpp
     src/title/input_delay.cpp
+    src/title/controllers.cpp
     src/title/practice.cpp
     src/title/presentation.cpp
     src/title/roster.cpp)
@@ -93,6 +97,7 @@ add_library(cafe_title STATIC
     src/title/draw.cpp
     src/title/font.cpp
     src/title/image.cpp
+    src/title/pictures.cpp
     src/title/text.cpp
     src/title/title_screen.cpp)
 target_include_directories(cafe_title PUBLIC src)
