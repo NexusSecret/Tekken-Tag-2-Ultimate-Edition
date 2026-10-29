@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 import zipfile
 from backend import Settings
-from setup_game import download, unzip, verified_rpx, setup, validate_setup_paths
+from setup_game import download, unzip, verified_rpx, setup, validate_setup_paths, ensure_importer, importer_ready
 
 class FirstRun(unittest.TestCase):
     def setUp(self):
@@ -48,6 +48,45 @@ class FirstRun(unittest.TestCase):
         with mock.patch('setup_game.ensure_tools') as tools:
             with self.assertRaises(ValueError):setup(settings,mock.Mock())
             tools.assert_not_called()
+
+class ImporterTools(unittest.TestCase):
+    """A launcher folder that did not set up the game (the release .exe after the project ZIP's setup): the game and
+    its characters are there, the compiler, numpy and Pillow are not; adding or removing one gets them."""
+    def setUp(self):
+        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
+        self.root=Path(temp.name);(self.root/'tools').mkdir()
+        lock=Path(__file__).resolve().parents[2]/'tools/windows-bootstrap.lock.json'
+        (self.root/'tools/windows-bootstrap.lock.json').write_bytes(lock.read_bytes())
+        self.settings=Settings(self.root/'build-windows-tools',self.root/'config.json',self.root)
+        self.settings.values['tools']=str(self.root/'local/windows-tools')
+        self.environment=mock.patch.dict('os.environ');self.environment.start();self.addCleanup(self.environment.stop)
+    def module(self,name,text):
+        path=self.root/'local/windows-tools/python'/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text)
+    def test_probe_reads_the_build_tools_python_folder(self):
+        self.module('numpy/__init__.py','raise ImportError("broken")');self.module('PIL/__init__.py','');self.module('PIL/Image.py','')
+        self.assertFalse(importer_ready(self.settings))
+        self.module('numpy/__init__.py','')
+        self.assertTrue(importer_ready(self.settings))
+    def test_missing_ones_are_got(self):
+        run=mock.Mock()
+        with mock.patch('setup_game.download',return_value=self.root/'llvm-mingw.zip') as download, \
+             mock.patch('setup_game.unzip') as unzip, mock.patch('setup_game.importer_ready',return_value=False), \
+             mock.patch('builtins.print'):
+            ensure_importer(self.settings,run)
+        self.assertTrue(download.call_args.args[1].name=='llvm-mingw.zip')
+        self.assertEqual(unzip.call_args.args[1],self.root/'local/windows-tools')
+        command=run.call_args.args[0]
+        self.assertEqual(command[1:4],['-m','pip','install'])
+        self.assertEqual(command[command.index('--target')+1],str(self.root/'local/windows-tools/python'))
+        self.assertEqual(sorted(p.split('==')[0] for p in command[command.index('--target')+2:]),['Pillow','numpy'])
+    def test_nothing_is_got_when_there(self):
+        clang=self.root/'local/windows-tools/llvm-mingw-20261020-ucrt-x86_64/bin/clang.exe'
+        clang.parent.mkdir(parents=True);clang.touch()
+        run=mock.Mock()
+        with mock.patch('setup_game.download') as download, mock.patch('setup_game.importer_ready',return_value=True):
+            ensure_importer(self.settings,run)
+        download.assert_not_called();run.assert_not_called()
+        import os;self.assertEqual(os.environ['TTT2_HELPER_CC'],str(clang))
 
 class PathPreflight(unittest.TestCase):
     def settings(self, root='D:/TTT2', tools='D:/TTT2/local/windows-tools'):

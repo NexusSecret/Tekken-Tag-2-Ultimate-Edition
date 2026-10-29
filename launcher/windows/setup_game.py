@@ -5,6 +5,7 @@ admin installation, system PATH change, game download, or Linux launcher change.
 """
 from pathlib import Path
 import hashlib
+import importlib
 import json
 import os
 import shutil
@@ -52,15 +53,50 @@ def powershell(script, *args):
     return ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script), *map(str,args)]
 
 
-def ensure_tools(settings, run):
-    lock = manifest(settings)
-    tools = Path(settings.values['tools'] or settings.root / 'local/windows-tools').resolve()
-    settings.values['tools'] = str(tools); settings.save()
-    downloads = settings.root / 'local/windows-downloads'
+def tools_folder(settings):
+    return Path(settings.values['tools'] or settings.root / 'local/windows-tools').resolve()
+
+
+def ensure_compiler(settings, lock, tools):
     compiler = tools / lock['compiler']['folder'] / 'bin/clang.exe'
     if not compiler.is_file():
-        archive = download(lock['compiler'], downloads / 'llvm-mingw.zip')
-        unzip(archive, tools)
+        print('@step tools Getting the C compiler', flush=True)
+        unzip(download(lock['compiler'], settings.root / 'local/windows-downloads/llvm-mingw.zip'), tools)
+    return compiler
+
+
+IMPORTER_PACKAGES = ('numpy', 'Pillow')
+
+def importer_ready(settings):
+    """numpy and Pillow import, as the importer finds them (the build tools' python folder)."""
+    probe = subprocess.run([sys.executable, '-c', 'import numpy, PIL.Image'], cwd=settings.root,
+                           env=settings.environment(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    return probe.returncode == 0
+
+
+def ensure_importer(settings, run):
+    """What adding or removing characters needs of Set Up Game's tools, got when missing: the C compiler (the
+    games' helpers), numpy and Pillow. A launcher whose own folder did not set up the game has none of them, though
+    the game and its characters are there (the release .exe after Set Up Game in the project ZIP)."""
+    lock = manifest(settings)
+    tools = tools_folder(settings)
+    ensure_compiler(settings, lock, tools)
+    if not importer_ready(settings):
+        print('@step tools Getting numpy and Pillow', flush=True)
+        pins = [p for p in lock['packages'] if p.split('==')[0] in IMPORTER_PACKAGES]
+        run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--only-binary=:all:',
+             '--upgrade', '--target', str(tools / 'python'), *pins], settings)
+        importlib.invalidate_caches()           # (this process imports them next: its path had no such folder)
+    os.environ.update(settings.environment())   # (TTT2_HELPER_CC: the compiler now there)
+
+
+def ensure_tools(settings, run):
+    lock = manifest(settings)
+    tools = tools_folder(settings)
+    settings.values['tools'] = str(tools); settings.save()
+    downloads = settings.root / 'local/windows-downloads'
+    compiler = ensure_compiler(settings, lock, tools)
     git = tools / 'git/cmd/git.exe'
     if not git.is_file() and not shutil.which('git'):
         unzip(download(lock['git'], downloads / 'mingit.zip'), tools / 'git')
