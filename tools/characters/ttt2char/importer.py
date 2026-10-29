@@ -17,7 +17,7 @@ import types
 
 from . import InputError, pack, shared, source as sources
 from .characters import CHARACTERS, GAMES, definition, game_of
-from .convert import art, chains, cloth, effects as fx, face, idmaps, itemdb, model, move_overrides, movelist, \
+from .convert import art, chains, cloth, effects as fx, face, gauge, idmaps, itemdb, model, move_overrides, movelist, \
     moveset, outfits, particles, tagsystem, tiger, voice, weapons
 from .tekken7 import tkmvst
 from .tekken7.autodump import FILES
@@ -366,6 +366,9 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
     contents = {'.xml': xml, '.nud': nud, '.nut': nut, '.bon': bon, '.moveset': moves, '.motion': motions}
     contents.update(banks)
     contents.update(pictures)
+    if gauge.of(d):
+        step('gauge: %s\'s gauge and its HUD from %s' % (d.NAME, source.NAME))
+        contents.update(gauge.hud_files(source.paks, d, log=lambda s: log('         ' + s)))
     contents.update(effect_files)
     if mvl is not None:
         contents['.mvl'] = mvl

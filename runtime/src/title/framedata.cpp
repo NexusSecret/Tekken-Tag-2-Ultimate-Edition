@@ -65,6 +65,7 @@
 // reactions, from the attacker's moveset).
 
 #include "title/framedata.h"
+#include "title/gauge.h"
 
 #include "gpu/overlay.h"
 #include "host/window.h"
@@ -244,6 +245,9 @@ struct Session {
     } top;
     std::vector<AttackLine> attack_lines;
     uint32_t body_hits[2][kBodySphereCount] = {}; // frames since a line crossed the sphere (from kAttackLinger + 1: none)
+    float panel_tops[2] = {};  // the sides' panels' tops as last shown (0: none)
+    bool history_shown = false; // and the input history's column
+    double panels_until = 0;   // and until when they show
 };
 Session g;
 
@@ -838,6 +842,7 @@ void lay_out_side(Layout& l, int s, const Fighter now[2], float bottom) {
     const float x0 = s == 0 ? kMargin : gpu::overlay::kWidth - kMargin - kWidth, x1 = x0 + kWidth;
     const float lower_h = 4 * kRow + kPadTop + kPadBottom, upper_h = 6 * kRow + kPadTop + kPadBottom;
     const float lower_top = bottom - lower_h, upper_top = lower_top - kGap - upper_h;
+    g.panel_tops[s] = upper_top;
     l.panel(s, x0, upper_top, x1, lower_top - kGap);
     l.panel(s, x0, lower_top, x1, bottom);
     const float lx = x0 + kPadSide, rx = x1 - kPadSide;
@@ -1134,6 +1139,9 @@ void publish(uint8_t* base, const Fighter now[2]) {
     } else {
         start_over_hitboxes();
     }
+    g.panel_tops[0] = g.panel_tops[1] = 0;
+    g.history_shown = history;
+    g.panels_until = seconds() + 0.25;
     if (g.settings[kPanels] && g.settings[kPanel1P]) lay_out_side(l, 0, now, bottom);
     if (g.settings[kPanels] && g.settings[kPanel2P]) lay_out_side(l, 1, now, bottom);
     if (history) lay_out_history(l);
@@ -1202,6 +1210,10 @@ void reset() { start_over(); }
 
 uint32_t setting(Setting s) { return g.settings[s]; }
 
+float panels_top(int side) { return seconds() < g.panels_until ? g.panel_tops[side & 1] : 0; }
+
+float history_right() { return seconds() < g.panels_until && g.history_shown ? kHistoryX1 : 0; }
+
 void set_setting(Setting s, uint32_t value) { g.settings[s] = s == kSlowMotion ? std::min(value, 2u) : value ? 1 : 0; }
 
 // The colour the title draws a fighter in (r3 the fighter) -> r3, four
@@ -1231,4 +1243,5 @@ PPC_FUNC(sub_04E1A0FC) {
     const uint32_t fighter = ctx.r[3];
     sub_04E1A0FC_orig(ctx, base);
     if (const uint32_t colour = cafe::title::framedata::colour(fighter)) ctx.r[3] = colour;
+    else if (const uint32_t flash = cafe::title::gauge::colour(fighter)) ctx.r[3] = flash; // (title/gauge.cpp)
 }

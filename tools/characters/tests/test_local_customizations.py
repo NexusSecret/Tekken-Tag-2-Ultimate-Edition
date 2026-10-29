@@ -15,8 +15,11 @@ class LocalCustomizations(unittest.TestCase):
         for name, count in expected.items():
             with self.subTest(fighter=name):
                 self.assertEqual(len(importlib.import_module('ttt2char.characters.'+name).PRESETS),count)
-    def test_free_meter_routes_remain_in_all_three_2d_fighters(self):
-        for c in (akuma,eliza,geese):
+    def test_meter_routes_remain_in_all_three_2d_fighters(self):
+        # Akuma pays for them from his gauge (convert/gauge.py); the others still have them free
+        self.assertFalse(akuma.MOVESET.get('free_meter_specials'))
+        self.assertEqual((akuma.GAUGE['max'],akuma.GAUGE['stock']),(1000,500))
+        for c in (eliza,geese):
             self.assertTrue(c.MOVESET['free_meter_specials'],c.NAME)
         targets=set(akuma.MOVESET['special_cancels']['Mx_rp00'])
         self.assertTrue({'Ry_EX_hadoh','Ry_EXtatumaki','Ry_shoryuBEX','Ry_shinhadouken'}<=targets)

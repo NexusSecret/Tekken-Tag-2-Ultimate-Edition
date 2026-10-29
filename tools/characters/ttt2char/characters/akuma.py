@@ -10,6 +10,7 @@ TEKKEN7_ID = 32
 TEKKEN7_CODE = 'mrx'
 CODE = 'mrx'
 SEX = 'male'
+REVISION = 1                  # his gauge (packs made before have his EX moves free)
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
@@ -81,6 +82,9 @@ _SPECIAL_TARGETS = (
     'Mx_hyakiD', 'Mx_asyurab', 'Mx_saving_cn',
 )
 
+# The Super Combo gauge (convert/gauge.py): two stocks of 500; his gains as Tekken 7 has them since its 2019 patch
+GAUGE = dict(max=1000, stock=500, gain=(37, 75, 112, 225), hud='/Game/UI_Common/Flash/sw_ui_hud_rage/sw_ui_hud_rage')
+
 MOVESET = {
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds, and d/f+1+2 (Mx_3lrp)
     'bounds': dict.fromkeys(('Mx_3lprp2', 'Mx_66rk', 'Mx_6lrp', 'Mx_6lrp2', 'Mx_hyaki_gouB', 'Mx_kkt2',
@@ -123,7 +127,6 @@ MOVESET = {
         'Ry_shoryuB': ('Mx_saving_cn',),
         'Ry_shoryuB2': ('Mx_saving_cn',),
     },
-    'free_meter_specials': True,
     'noncontact_special_cancels': ('Ry_hadohB', 'Ry_hadoh', 'Ry_Shadoh', 'Ry_ShadohB', 'Ry_ShadohB2'),
     # Preserve T7's early motion capture and contact-time dispatch.
     'buffered_special_cancels': True,

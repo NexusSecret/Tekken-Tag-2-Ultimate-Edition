@@ -51,6 +51,7 @@ import subprocess
 import sys
 
 from . import InputError, signals, paths
+from .convert import gauge
 from .characters import GAMES, game_of
 
 FILES = ('.xml', '.nud', '.nut', '.bon', '.moveset', '.motion')
@@ -237,7 +238,8 @@ def character_ini(d, slot, chr_tones=0, voice_extra=(), weapons=(), outfits=()):
             + ('stand_in = %s\n' % d.DONOR if getattr(d, 'WITHOUT_OWN_MOVESET', False) else '')
             + ('voice_extra = %s\n' % ' '.join(map(str, voice_extra)) if voice_extra else '')
             + ('weapons = %s\n' % ' '.join(item(*w) for w in weapons) if weapons else '')
-            + ('outfits = %s\n' % ' '.join(outfits) if outfits else ''))
+            + ('outfits = %s\n' % ' '.join(outfits) if outfits else '')
+            + (gauge.ini_line(d) + '\n' if gauge.ini_line(d) else ''))
 
 
 def read_ini(path):

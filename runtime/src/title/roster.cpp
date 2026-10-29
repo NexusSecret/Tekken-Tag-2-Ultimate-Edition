@@ -3,6 +3,7 @@
 #include "title/noctis_assault.h"
 #include "title/noctis_hitbox.h"
 #include "title/damage_scaling.h"
+#include "title/gauge.h"
 #include "outfit_menu.h"
 
 #include "cafe/ppc_ops.h"
@@ -372,6 +373,7 @@ struct Pack {
     std::vector<uint32_t> voice_extra; // its bank's shouts past the donor's (appended to the voice list)
     std::vector<Weapon> weapons;       // character.ini weapons: k:parent:points[:summon] (see pose_weapons)
     std::vector<std::string> outfits;  // optional complete body sets, in chooser order
+    std::optional<gauge::Config> gauge; // a Tekken 7 2D fighter's gauge (title/gauge.h)
 };
 
 fs::path packs_directory() {
@@ -423,6 +425,9 @@ std::optional<Pack> read_pack(const fs::path& directory) {
         else if (key == "sex") pack.female = value != "male";
         else if (key == "slot") pack.slot = ini_number(value).value_or(-1);
         else if (key == "chr_tones") pack.chr_tones = static_cast<uint32_t>(std::strtoul(value.c_str(), nullptr, 10));
+        else if (key == "gauge") {
+            if (gauge::Config config; gauge::parse(value, config)) pack.gauge = config;
+        }
         else if (key == "outfits") {
             std::istringstream names(value);
             for (std::string code; names >> code;) pack.outfits.push_back(code);
@@ -1206,6 +1211,12 @@ void prepare_costumes(const Pack& pack, uint32_t donor, size_t slot) {
 // R = Rz Ry Rx, scale), and their last frame puts the bones back where they
 // wait (the pack's tiger: far below the floor).
 constexpr uint32_t kPlayerSelectId = 84, kPlayerAnimator = 7944;
+} // namespace
+
+// The added fighter (its slot) a fighter is, or -1.
+int added_slot(uint32_t player) { return player ? slot_of_id(load(player + kPlayerSelectId)) : -1; }
+
+namespace {
 constexpr uint32_t kAnimatorSet = 8, kAnimatorValue = 12, kAnimatorFrame = 16;
 constexpr uint32_t kPart3 = 0x4000;         // an animator's value: an animation of part 3 (index below)
 constexpr uint32_t kModelInterface = 12948; // the model's interface: its method +68 gives the player
@@ -1385,6 +1396,7 @@ void prepare_roster() {
         }
         added.code_string = guest_string(pack.code);
         added.active = true;
+        if (pack.gauge) gauge::configure(static_cast<int>(k), *pack.gauge, pack.directory);
         if (const auto place = cell_of(k)) {
             added.cell = kFirstAddedCell + static_cast<uint32_t>(k);
             added.column = place->column;
@@ -3682,6 +3694,10 @@ PPC_FUNC(sub_03AE1704) { // defender r3, attacker r4, damage result r5
 PPC_FUNC(sub_03AE86A0_orig);
 PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const uint32_t player = ctx.r[3], id = load(ctx.r[4]);
+    // (each property comes twice, pass 1 then 0: acted on once)
+    if ((id == gauge::kAdd || id == gauge::kNoGain || id == gauge::kFlash) &&
+        (ctx.r[5] != 0 || gauge::property(player, added_slot(player), id, load(ctx.r[4] + 4))))
+        return;
     if ((id == kArcProp || id == kArcBakedProp || id == kArcAirMoveProp) && ctx.r[5] == 0 &&
         slot_of_id(load(player + kPlayerSelectId)) >= 0)
         arc_property(player, id, load(ctx.r[4] + 4));
@@ -3708,6 +3724,11 @@ PPC_FUNC(sub_0404FF30_orig);
 PPC_FUNC(sub_0404FF30) {
     const uint32_t requirement = ctx.r[3], player = ctx.r[4];
     const uint32_t kind = load(requirement);
+    if (bool result; (kind == gauge::kAtLeast || kind == gauge::kBelow) &&
+                     gauge::requirement(player, added_slot(player), kind, load(requirement + 4), result)) {
+        ctx.r[3] = result;
+        return;
+    }
     const bool trace = (std::getenv("TTT2_TRACE_AKUMA") || std::getenv("TTT2_TRACE_SPECIAL_CANCELS")) &&
         (kind == 307 || kind == 308 || ((kind == 46 || kind == 47) && load(player + 0x63c) != 0));
     const uint32_t wanted = trace ? load(requirement + 4) : 0;

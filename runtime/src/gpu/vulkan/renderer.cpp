@@ -407,7 +407,8 @@ void Renderer::capture() {
     }
     captured_frame_ = tv_only ? -1 : static_cast<int64_t>(frame_number_);
     captured_index_ = index;
-    if (const overlay::State s = overlay::current(); scan_valid_[0] && (s.quads || s.scene)) overlay_capture_ = index;
+    if (const overlay::State s = overlay::current(); scan_valid_[0] && (s.quads || s.scene || s.hud_quads))
+        overlay_capture_ = index;
     ++index;
     // TTT2_CAPTURE_SEQUENCE=<frames>: also every image shown for the next
     // frames, in the order shown, as seq_<index>_<frame>_<n>.png (the real

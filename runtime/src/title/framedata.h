@@ -19,5 +19,11 @@ void reset();
 enum Setting { kPanels, kPanel1P, kPanel2P, kAdvantageColours, kHitboxes, kTopCamera, kSlowMotion, kSettings };
 uint32_t setting(Setting s);
 void set_setting(Setting s, uint32_t value);
+// The top of a side's panels (0 left, 1 right) on the TV image while they
+// show, else 0 (title/gauge.cpp's HUD goes above them).
+float panels_top(int side);
+// The right edge of the input history's column (on the left) while it
+// shows, else 0.
+float history_right();
 
 } // namespace cafe::title::framedata

@@ -449,7 +449,15 @@ private:
     VkPipeline overlay_solid_pipeline(VkFormat format, int pass);
     // (view: the part of the TV image they are seen in, in its pixels)
     void draw_overlay_solids(const Image& target, const void* scene, const float* view_projection, const float* view);
-    void draw_overlay_quads(const Image& target, const overlay::State& state);
+    // An overlay atlas as an image, uploaded when the layer's atlas changes.
+    struct OverlayAtlas {
+        Image image;
+        const void* source = nullptr;      // the atlas `image` holds
+        std::shared_ptr<const void> keep;  // (kept, so its address names it)
+    };
+    void draw_overlay_quads(const Image& target, OverlayAtlas& cached,
+                            const std::shared_ptr<const overlay::Atlas>& atlas,
+                            const std::shared_ptr<const std::vector<overlay::Quad>>& quads);
     void draw_overlay_image(const Image& target, const Image& image, const std::vector<overlay::Quad>& quads,
                             bool opaque = false);
     VkPipelineLayout overlay_solid_layout_ = VK_NULL_HANDLE;
@@ -458,9 +466,7 @@ private:
     VkPipelineLayout overlay_layout_ = VK_NULL_HANDLE;
     VkSampler overlay_sampler_ = VK_NULL_HANDLE;
     std::map<std::pair<VkFormat, bool>, VkPipeline> overlay_pipelines_;
-    Image overlay_atlas_;
-    const void* overlay_atlas_source_ = nullptr;      // the atlas overlay_atlas_ holds
-    std::shared_ptr<const void> overlay_atlas_keep_;  // (kept, so its address names it)
+    OverlayAtlas overlay_atlas_, overlay_hud_atlas_;
     int64_t overlay_capture_ = -1; // TTT2_CAPTURE: the TV capture to save again with the overlay
 
     // ------------------------------------------------------ misc (renderer.cpp)

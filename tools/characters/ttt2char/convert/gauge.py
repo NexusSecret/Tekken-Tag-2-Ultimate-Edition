@@ -1,0 +1,201 @@
+"""Tekken 7 2D fighters' gauges (Akuma's Super Combo gauge, Eliza's): the moveset's checks and costs kept, on ids the
+runtime handles (runtime/src/title/gauge.cpp), and the HUD Tekken 7 draws for it (its pictures and animations baked
+from its HUD movie into the pack's gauge/).
+
+A definition opts in with GAUGE = dict(max, stock, gain=(blocked: the defender's, the attacker's; hit: the defender's,
+the attacker's) in percent of the damage, hud=the HUD movie's object path). Facts (Tekken 7's executable):
+* requirement 629: the gauge (player +0xcc8) >= param, 635: < param; property 0x81c2 adds its value (signed) and clamps
+  it to 0 .. its most (+0xccc);
+* property 0x8228 (value 1): the move gains no gauge for its attacks (+0x6b4, read by the gains); 0x8229: the fighter
+  lights up (an EX move, a Focus cancel);
+* the gains (0x140713f72): Akuma 37 / 75 / 112 / 225, Geese 21 / 85 / 63 / 255, everyone else 50 / 100 / 150 / 300.
+"""
+# the runtime's requirements: ids no TTT2 moveset uses that TTT2's requirement function takes as false, below 643 (TTT2
+# marks cancel rows testing 643 and above as special ones, never tested for a player: sub_040D2300)
+AT_LEAST, BELOW = 190, 191
+ADD, NO_GAIN, FLASH = 0x8220, 0x8222, 0x8223  # the runtime's properties (TTT2's interpreter passes over them)
+REQS = {'t7': {629: AT_LEAST, 635: BELOW}, 't8': {}}
+PROPS = {'t7': {0x81c2: ADD, 0x8228: NO_GAIN, 0x8229: FLASH}, 't8': {}}
+
+
+def of(defn):
+    """The definition's gauge (a dict) or None."""
+    return vars(defn).get('GAUGE')
+
+
+def ini_line(defn):
+    """character.ini's `gauge` line (title/gauge.h), or None."""
+    g = of(defn)
+    if not g:
+        return None
+    return 'gauge = %d %d %d %d %d %d' % ((g['max'], g['stock']) + tuple(g.get('gain', (50, 100, 150, 300))))
+
+
+# ------------------------------------------------------------------------------------------------ the HUD
+# Tekken 7's HUD movie for the gauge (SW_UI_HUD_Rage: Akuma's; _ELZ: Eliza's): EX_mc at the bottom of its 1920 x 1080
+# screen holds a panel per side, EX_L_mc / EX_R_mc, each with these clips the game's HUD code plays by their labels
+# (0x1404c1b90 moves each slot's Bar_mc: a slot of 154 pixels per stock). The gauge fills from the screen's edge: the
+# first stock is the outer slot (ExGauge_L2_mc, R2), the second the one by EX / SUPER! (the user, who plays Tekken 7)
+SIDES = (('L', 'EX_mc.EX_L_mc'), ('R', 'EX_mc.EX_R_mc'))
+CLIPS = (('base', 'EXBase_%s_mc'), ('slot0', 'ExGauge_%s2_mc'), ('slot1', 'ExGauge_%s1_mc'), ('text', 'EXText_%s_mc'),
+         ('light', 'EXLight_%s_mc'), ('lightning', 'EXLightning_%s_mc'), ('focus', 'EXFocus_%s_mc'))
+BAR, MASK = 'Bar_mc', 'BarMask_mc'
+TRAVEL = 154                    # a slot's bar's way from empty to full (the HUD code's 0x9a)
+ATLAS_WIDTH = 2048
+BIG = 512                       # pictures larger than this are kept at half their size (glows)
+
+
+def _movie(paks, path):
+    from ..tekken7 import swf, uasset
+    pkg = uasset.load(paks, path)
+    data = bytes(pkg.data)
+    at = data.find(b'GFX')
+    if at < 0:
+        raise ValueError('%s holds no GFX movie' % path)
+    return swf.Movie(data[at:])
+
+
+def _picture(paks, folder, name):
+    from ..tekken7 import texture, uasset
+    import numpy as np
+    t = texture.Texture2D(uasset.load(paks, folder + '/' + name))
+    return np.asarray(t.decode(), np.uint8)
+
+
+def _hex(c):
+    return '%02X%02X%02X%02X' % tuple(int(round(max(0.0, min(1.0, v)) * 255)) for v in c)
+
+
+def hud_files(paks, defn, log=print):
+    """{pack file name: bytes}: gauge/gauge.nut (the pictures the HUD shows, one image) and gauge/gauge.ini (where and
+    how, frame by frame, as the movie plays its clips), for runtime/src/title/gauge.cpp."""
+    import numpy as np
+    from ..tekken7 import swf
+    from ..ttt2 import nut
+    g = of(defn)
+    if not g or not g.get('hud'):
+        return {}
+    path = g['hud']
+    folder = path.rsplit('/', 1)[0]
+    movie = _movie(paks, path)
+    lines, used, rotated = [], {}, 0
+    images = {}
+
+    def picture(pic):
+        if pic.name not in images:
+            img = _picture(paks, folder, pic.name)
+            if max(img.shape[:2]) > BIG:
+                h, w = img.shape[:2]
+                img = img[:h - h % 2, :w - w % 2].reshape(h // 2, 2, w // 2, 2, 4).mean((1, 3)).astype(np.uint8)
+            images[pic.name] = img
+        return images[pic.name]
+
+    def quad(pic, m, clip):
+        """(x0, y0, x1, y1, u0, v0, u1, v1) of a picture placed by matrix m, clipped (u, v in the picture, 0 to 1), or
+        None (rotated, or clipped away)."""
+        if abs(m[1]) > 1e-3 or abs(m[2]) > 1e-3:
+            return None
+        x0, y0 = m[4], m[5]
+        x1, y1 = x0 + m[0] * pic.width, y0 + m[3] * pic.height
+        u0, v0, u1, v1 = 0.0, 0.0, 1.0, 1.0
+        if clip is not None:
+            lo_x, hi_x, lo_y, hi_y = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+            cx0, cy0, cx1, cy1 = max(lo_x, clip[0]), max(lo_y, clip[1]), min(hi_x, clip[2]), min(hi_y, clip[3])
+            if cx0 >= cx1 or cy0 >= cy1:
+                return None
+            def t(a, lo, hi):
+                return (a - lo) / (hi - lo)
+            fx0, fx1 = (t(cx0, x0, x1), t(cx1, x0, x1)) if x1 > x0 else (t(cx1, x0, x1), t(cx0, x0, x1))
+            fy0, fy1 = (t(cy0, y0, y1), t(cy1, y0, y1)) if y1 > y0 else (t(cy1, y0, y1), t(cy0, y0, y1))
+            nx0, nx1 = (cx0, cx1) if x1 > x0 else (cx1, cx0)
+            ny0, ny1 = (cy0, cy1) if y1 > y0 else (cy1, cy0)
+            x0, x1, y0, y1, u0, u1, v0, v1 = nx0, nx1, ny0, ny1, fx0, fx1, fy0, fy1
+        return x0, y0, x1, y1, u0, v0, u1, v1
+
+    out = []                    # (kind, fields...) with pictures by name, placed in the atlas at the end
+    for side, side_path in SIDES:
+        side_sprite, side_matrix = movie.find(side_path)
+        for clip, instance in CLIPS:
+            name = instance % side
+            entry = next((e for e in movie.display(side_sprite, 0).values() if e['name'] == name), None)
+            if entry is None:
+                continue
+            sprite = movie.characters[entry['char']]
+            matrix = swf.concat(side_matrix, entry['matrix'])
+            if clip.startswith('slot'):
+                k = int(clip[4:])
+                shown = movie.display(sprite, 0)
+                bar = next((e for e in shown.values() if e['name'] == BAR), None)
+                mask = next((e for e in shown.values() if e['name'] == MASK and e['clip']), None)
+                if bar is None or mask is None:
+                    raise ValueError('%s has no %s / %s' % (name, BAR, MASK))
+                rect = movie.bounds(movie.characters[mask['char']], swf.concat(matrix, mask['matrix']))
+                for pic, m, cx, blend, _ in movie.flatten(movie.characters[bar['char']], 0,
+                                                          swf.concat(matrix, bar['matrix'])):
+                    q = quad(pic, m, None)
+                    if q:
+                        used[pic.name] = pic
+                        out.append(('bar', side, k, pic.name) + q)
+                out.append(('mask', side, k) + rect + (1 if side == 'L' else -1,))
+            out.append(('clip', side, clip, len(sprite.frames)))
+            for label, first in sorted(sprite.labels.items(), key=lambda x: x[1]):
+                later = [f for f in sprite.labels.values() if f > first]
+                out.append(('label', side, clip, label, first, (min(later) if later else len(sprite.frames)) - 1))
+            for f in range(len(sprite.frames)):
+                out.append(('frame', side, clip, f))
+                for pic, m, cx, blend, cl in movie.flatten(sprite, f, matrix, skip=(BAR,)):
+                    q = quad(pic, m, cl)
+                    if q is None:
+                        rotated += abs(m[1]) > 1e-3 or abs(m[2]) > 1e-3
+                        continue
+                    (mr, mg, mb, ma), (ar, ag, ab, _) = cx
+                    if ma <= 0:
+                        continue
+                    used[pic.name] = pic
+                    out.append(('q', pic.name) + q + (_hex((mr, mg, mb, ma)), _hex((ar, ag, ab, 0))[:6],
+                                                      'FF' if blend == swf.BLEND_ADD else '00'))
+    # the atlas: the pictures shown, on shelves
+    placed, x, y, shelf = {}, 0, 0, 0
+    for name in sorted(used, key=lambda n: -picture(used[n]).shape[0]):
+        img = picture(used[name])
+        h, w = img.shape[:2]
+        if x + w > ATLAS_WIDTH:
+            x, y, shelf = 0, y + shelf + 2, 0
+        placed[name] = (x, y, w, h)
+        x, shelf = x + w + 2, max(shelf, h)
+    height = 1
+    while height < y + shelf:
+        height *= 2
+    atlas = np.zeros((height, ATLAS_WIDTH, 4), np.uint8)
+    for name, (x, y, w, h) in placed.items():
+        atlas[y:y + h, x:x + w] = picture(used[name])
+    def uv(name, u0, v0, u1, v1):
+        x, y, w, h = placed[name]
+        return '%.2f %.2f %.2f %.2f' % (x + u0 * w, y + v0 * h, x + u1 * w, y + v1 * h)
+    lines = ['# %s\'s gauge as Tekken 7 shows it (%s), made on this machine from the player\'s own copy' % (
+        defn.NAME, path.rsplit('/', 1)[1]),
+        '# positions on Tekken 7\'s 1920 x 1080 screen; pictures by their texels in gauge.nut',
+        'atlas %d %d' % (ATLAS_WIDTH, height), 'travel %d' % TRAVEL]
+    for o in out:
+        if o[0] == 'bar':
+            _, side, k, name, x0, y0, x1, y1, u0, v0, u1, v1 = o
+            lines.append('bar %s %d %.2f %.2f %.2f %.2f %s' % (side, k, x0, y0, x1, y1, uv(name, u0, v0, u1, v1)))
+        elif o[0] == 'mask':
+            lines.append('mask %s %d %.2f %.2f %.2f %.2f %d' % o[1:])
+        elif o[0] == 'clip':
+            lines.append('clip %s %s %d' % o[1:])
+        elif o[0] == 'label':
+            lines.append('label %s %s %s %d %d' % o[1:])
+        elif o[0] == 'frame':
+            lines.append('frame %s %s %d' % o[1:])
+        else:
+            _, name, x0, y0, x1, y1, u0, v0, u1, v1, mult, add, blend = o
+            lines.append('q %.2f %.2f %.2f %.2f %s %s %s%s' % (x0, y0, x1, y1, uv(name, u0, v0, u1, v1), mult, add,
+                                                               blend))
+    # ARGB8 (the runtime decodes it: title/image.h)
+    argb = np.concatenate([atlas[..., 3:4], atlas[..., :3]], axis=2).tobytes()
+    tex = dict(fmt=14, w=ATLAS_WIDTH, h=height, mips=[argb], gidx=0)
+    log('gauge HUD: %d pictures (%dx%d), %d placements%s' % (
+        len(placed), ATLAS_WIDTH, height, sum(1 for o in out if o[0] == 'q'),
+        ', %d rotated ones left out' % rotated if rotated else ''))
+    return {'gauge/gauge.nut': nut.write([tex]), 'gauge/gauge.ini': ('\n'.join(lines) + '\n').encode('utf-8')}

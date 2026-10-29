@@ -34,6 +34,7 @@ import numpy as np
 from ..movesets import REACTION_MOVE_FIELDS, TABLE_ORDER, TTT2
 from ..ttt2 import animation, motbin, motion
 from . import arcs
+from . import gauge as G
 from . import idmaps as M
 from . import tagsystem, tagcombo, specialcancels, move_overrides, retarget
 
@@ -200,7 +201,8 @@ MOVE_PARAM = {'t7': 0x81dc, 't8': 0x824c}
 # tested. Reina: 0x803d -> 0x8022 (1233 .. 3856 where TTT2 passes 0 .. 35), 0x8219 -> 0x8110 (1: TTT2 passes 0),
 # 0x8084 -> 0x8056 (TTT2's movesets never use it), her own 143 -> 139 (100: TTT2 tests 17 .. 46), ...
 PARRY = {'t7': {817, 823}, 't8': set()}            # parry lists: not converted
-# the meter (Tekken 7's EX moves and supers): its requirement and its cost; left out with free_meter_specials
+# the meter (Tekken 7's EX moves and supers): its requirement and its cost; left out with free_meter_specials, kept on
+# the runtime's gauge ids for a definition with GAUGE (convert/gauge.py)
 METER, METER_COST = {'t7': 629, 't8': 738}, {'t7': 0x81c2, 't8': 0x8232}
 EFFECT_PROP = 0x801f                 # spawn an effect: value = body part << 8 | effect id
 # Tekken 7 spawns effects with 0x8036 (the id maps find 0x801f) and, in a few moves, 0x8038 (the same value). Tekken 8
@@ -477,6 +479,7 @@ class Converter:
     # (a Tekken 7 source unless __init__ finds another game)
     game, end, prefix = 't7', T7_END, None
     linking = 0                         # > 0 while the links of the fighter's own (or converted) moves are made
+    gauge = None                        # the definition's GAUGE (convert/gauge.py), set by __init__
     _fit = None                         # FIT's ranges: {'req' / 'prop': {TTT2 id: (lowest, highest)}}, when needed
 
     def __init__(self, k, h7, donor, donor_pack, h2, common_motions, maps, usage, newid, d):
@@ -586,7 +589,9 @@ class Converter:
         self.extra_index = {}
         for j, e in enumerate(T['cancel_extras']):
             self.extra_index.setdefault(e['value'], j)
-        dropped = DROP_MOVES.replace(r'|_EX\d?$', '') if d.MOVESET.get('free_meter_specials') else DROP_MOVES
+        self.gauge = G.of(d)            # Tekken 7's gauge kept (convert/gauge.py): its EX moves too
+        dropped = DROP_MOVES.replace(r'|_EX\d?$', '') if d.MOVESET.get('free_meter_specials') or self.gauge \
+            else DROP_MOVES
         self.drop_moves = re.compile('|'.join([dropped] + ([d.MOVESET['drop_moves']] if d.MOVESET.get('drop_moves')
                                                           else [])))
         self.ground_arcs = {}           # Tekken 7 move -> (frame, value) of its 0x8226 to bake (convert/arcs.py)
@@ -613,6 +618,10 @@ class Converter:
         g = self.game
         if c == self.end:
             return TT_END
+        if self.gauge and c in G.REQS[g]:
+            return G.REQS[g][c]
+        if self.gauge and c in G.PROPS[g]:         # (an action in a requirement list)
+            return G.PROPS[g][c]
         if c in REQ_OVERRIDE[g]:
             return REQ_OVERRIDE[g][c]
         if c in REQ_FALSE[g]:
@@ -632,6 +641,8 @@ class Converter:
         # must not remap it onto an unrelated native property.
         if p == METER_COST[g] and self.defn.MOVESET.get('free_meter_specials'):
             return None
+        if self.gauge and p in G.PROPS[g]:
+            return G.PROPS[g][p]
         if p == TIGER_PROP[g] and self.opt_anims:
             return OPT_ANIM_PROP
         if p in PROP_OVERRIDE[g]:

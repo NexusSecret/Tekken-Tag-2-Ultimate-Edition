@@ -1312,6 +1312,30 @@ carries the colour grid and both palettes). The pack holds Namco's assets:
 the importer refuses to write it inside this repository, and `.gitignore`
 keeps the games' file types out.
 
+Tekken 7's 2D fighters' gauges (Akuma's so far; `GAUGE` in a definition,
+`convert/gauge.py`, `title/gauge.cpp`): Tekken 7 keeps the gauge in its
+executable, the moveset only tests it (requirement 629: at least `param`,
+635: less) and changes it (0x81c2 adds its value: EX moves -500, supers
+-1000), with 0x8228 (the move's attacks build none) and 0x8229 (the fighter
+lights up). The converted moveset keeps them on the port's own ids:
+requirements 190 and 191 (no TTT2 moveset uses them and sub_0404FF30 takes
+them as false; ids above 642 would not do, as the cancel rows' loader
+sub_040D2300 marks rows testing them as special ones, never tested for a
+player) and properties 0x8220, 0x8222 and 0x8223 (TTT2's interpreter
+passes over them). The runtime does what Tekken 7's executable does around
+them: after each fighters' frame a fighter that lost health gains that
+times 112% / 150% (Akuma's / anyone else's), its opponent 225% / 300%, of a
+blocked attack's damage 37% / 50% and 75% / 100%; the gauge empties at a
+match's start and carries over between rounds. The flash multiplies the
+fighter's colour (sub_04E1A0FC) by yellow for a moment. The HUD is Tekken
+7's, from its HUD movie (a Scaleform SWF, `tekken7/swf.py`): the importer
+plays each clip's timeline and writes every frame's placed pictures into
+the pack's `gauge/` (gauge.ini over gauge.nut), and the runtime shows the
+clips Tekken 7's HUD code would for the gauge (a stock fills, every stock
+full, the gauge spent) on the overlay's HUD layer, the slots' bars moved
+along their masks, while the fighters' round phase (player +2048) is past
+its intro.
+
 ## The launcher
 
 `launcher/` is what players start: `ttt2-launcher`, shown as "Ultimate

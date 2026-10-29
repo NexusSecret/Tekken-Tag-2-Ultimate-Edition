@@ -32,13 +32,16 @@ layout(location = 0) in vec4 rect;
 layout(location = 1) in vec4 uv;
 layout(location = 2) in vec4 top;
 layout(location = 3) in vec4 bottom;
+layout(location = 4) in vec4 add;
 layout(location = 0) out vec2 v_uv;
 layout(location = 1) out vec4 v_colour;
+layout(location = 2) flat out vec4 v_add;
 void main() {
     const vec2 corner = vec2(gl_VertexIndex & 1, gl_VertexIndex >> 1);
     gl_Position = vec4(mix(rect.xy, rect.zw, corner) / vec2(1280.0, 720.0) * 2.0 - 1.0, 0.0, 1.0);
     v_uv = mix(uv.xy, uv.zw, corner);
     v_colour = mix(top, bottom, corner.y);
+    v_add = add;
 }
 )";
 
@@ -46,8 +49,15 @@ constexpr const char* kFragmentShader = R"(#version 460
 layout(set = 0, binding = 0) uniform sampler2D atlas;
 layout(location = 0) in vec2 v_uv;
 layout(location = 1) in vec4 v_colour;
+layout(location = 2) flat in vec4 v_add;
 layout(location = 0) out vec4 colour;
-void main() { colour = texture(atlas, v_uv) * v_colour; }
+// Premultiplied (the blend adds the image's share): the colour times the
+// quad's, plus its add; blended additively when the add's alpha is set.
+void main() {
+    vec4 c = texture(atlas, v_uv) * v_colour;
+    c.rgb = min(c.rgb + v_add.rgb, 1.0);
+    colour = vec4(c.rgb * c.a, v_add.a > 0.5 ? 0.0 : c.a);
+}
 )";
 
 // For a picture of the title's (its alpha means nothing).
@@ -56,7 +66,10 @@ layout(set = 0, binding = 0) uniform sampler2D atlas;
 layout(location = 0) in vec2 v_uv;
 layout(location = 1) in vec4 v_colour;
 layout(location = 0) out vec4 colour;
-void main() { colour = vec4(texture(atlas, v_uv).rgb, 1.0) * v_colour; }
+void main() {
+    const vec4 c = vec4(texture(atlas, v_uv).rgb, 1.0) * v_colour;
+    colour = vec4(c.rgb * c.a, c.a);
+}
 )";
 
 constexpr const char* kSolidVertexShader = R"(#version 460
@@ -204,9 +217,9 @@ void cover(const overlay::Solid& s, const float m[16], float rect[4]) {
 // A quad as the vertex shader reads it, per instance.
 struct Instance {
     float rect[4], uv[4];
-    uint8_t top[4], bottom[4];
+    uint8_t top[4], bottom[4], add[4];
 };
-static_assert(sizeof(Instance) == 40);
+static_assert(sizeof(Instance) == 44);
 
 void bytes(uint32_t rgba, uint8_t out[4]) {
     for (int i = 0; i < 4; ++i) out[i] = static_cast<uint8_t>(rgba >> (24 - 8 * i));
@@ -260,16 +273,17 @@ VkPipeline Renderer::overlay_pipeline(VkFormat format, bool opaque) {
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fs, "main", nullptr},
     };
     const VkVertexInputBindingDescription binding{0, sizeof(Instance), VK_VERTEX_INPUT_RATE_INSTANCE};
-    const VkVertexInputAttributeDescription attributes[4] = {
+    const VkVertexInputAttributeDescription attributes[5] = {
         {0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, rect)},
         {1, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Instance, uv)},
         {2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(Instance, top)},
         {3, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(Instance, bottom)},
+        {4, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(Instance, add)},
     };
     VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     vi.vertexBindingDescriptionCount = 1;
     vi.pVertexBindingDescriptions = &binding;
-    vi.vertexAttributeDescriptionCount = 4;
+    vi.vertexAttributeDescriptionCount = 5;
     vi.pVertexAttributeDescriptions = attributes;
     VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
     ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
@@ -284,7 +298,7 @@ VkPipeline Renderer::overlay_pipeline(VkFormat format, bool opaque) {
     VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
     VkPipelineColorBlendAttachmentState blend{};
     blend.blendEnable = VK_TRUE;
-    blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE; // (premultiplied by the shaders)
     blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     blend.colorBlendOp = VK_BLEND_OP_ADD;
     blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -495,8 +509,9 @@ void Renderer::draw_overlay_solids(const Image& target, const void* scene_pointe
 void Renderer::draw_overlay(const Image& target) {
     const overlay::State state = overlay::current();
     static constexpr float kWhole[4] = {0, 0, overlay::kWidth, overlay::kHeight};
+    draw_overlay_quads(target, overlay_hud_atlas_, state.hud_atlas, state.hud_quads);
     if (state.scene) draw_overlay_solids(target, state.scene.get(), state.scene->view_projection, kWhole);
-    draw_overlay_quads(target, state);
+    draw_overlay_quads(target, overlay_atlas_, state.atlas, state.quads);
     if (state.window && view_image_valid_) {
         const overlay::Window& w = *state.window;
         const overlay::Quad q{w.rect[0], w.rect[1], w.rect[2], w.rect[3], w.crop[0] / overlay::kWidth,
@@ -507,18 +522,20 @@ void Renderer::draw_overlay(const Image& target) {
     }
 }
 
-void Renderer::draw_overlay_quads(const Image& target, const overlay::State& state) {
-    if (!state.quads || !state.atlas || state.atlas->width == 0) return;
+void Renderer::draw_overlay_quads(const Image& target, OverlayAtlas& cached,
+                                  const std::shared_ptr<const overlay::Atlas>& atlas,
+                                  const std::shared_ptr<const std::vector<overlay::Quad>>& quads) {
+    if (!quads || !atlas || atlas->width == 0) return;
     end_rendering();
-    if (state.atlas.get() != overlay_atlas_source_) {
-        if (overlay_atlas_.image != VK_NULL_HANDLE) {
+    if (atlas.get() != cached.source) {
+        if (cached.image.image != VK_NULL_HANDLE) {
             submit(true); // nothing recorded reads the old one any more
-            destroy_image(overlay_atlas_);
+            destroy_image(cached.image);
         }
-        const overlay::Atlas& a = *state.atlas;
-        overlay_atlas_ = create_image(VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, a.width, a.height, 1, 1,
-                                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                                      VK_IMAGE_VIEW_TYPE_2D);
+        const overlay::Atlas& a = *atlas;
+        cached.image = create_image(VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, a.width, a.height, 1, 1,
+                                    VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                    VK_IMAGE_VIEW_TYPE_2D);
         VkDeviceSize offset = 0;
         uint8_t* p = upload(a.pixels.size(), 16, offset);
         std::memcpy(p, a.pixels.data(), a.pixels.size());
@@ -526,11 +543,11 @@ void Renderer::draw_overlay_quads(const Image& target, const overlay::State& sta
         region.bufferOffset = offset;
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {a.width, a.height, 1};
-        vkCmdCopyBufferToImage(cmd(), ring_.buffer(), overlay_atlas_.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-        overlay_atlas_source_ = state.atlas.get();
-        overlay_atlas_keep_ = state.atlas;
+        vkCmdCopyBufferToImage(cmd(), ring_.buffer(), cached.image.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+        cached.source = atlas.get();
+        cached.keep = atlas;
     }
-    draw_overlay_image(target, overlay_atlas_, *state.quads);
+    draw_overlay_image(target, cached.image, *quads);
 }
 
 // Quads sampling `image`.
@@ -541,9 +558,10 @@ void Renderer::draw_overlay_image(const Image& target, const Image& image_source
     for (size_t i = 0; i < quads.size(); ++i) {
         const overlay::Quad& q = quads[i];
         Instance& in = instances[i];
-        in = {{q.x0, q.y0, q.x1, q.y1}, {q.u0, q.v0, q.u1, q.v1}, {}, {}};
+        in = {{q.x0, q.y0, q.x1, q.y1}, {q.u0, q.v0, q.u1, q.v1}, {}, {}, {}};
         bytes(q.top, in.top);
         bytes(q.bottom, in.bottom);
+        bytes(q.add, in.add);
     }
     const VkPipeline pipeline = overlay_pipeline(target.format, opaque);
     barrier(); // the copy into the image, the atlas upload

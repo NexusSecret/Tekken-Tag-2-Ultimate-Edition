@@ -19,6 +19,8 @@ struct Quad {
     float x0 = 0, y0 = 0, x1 = 0, y1 = 0; // in the TV image's pixels
     float u0 = 0, v0 = 0, u1 = 0, v1 = 0; // in the atlas, 0 to 1
     uint32_t top = 0, bottom = 0;         // colours, 0xRRGGBBAA, multiplying the atlas
+    uint32_t add = 0;                     // 0xRRGGBB added after (a Flash colour transform's); its
+                                          // alpha 0xFF: blended additively (a Flash "add" blend)
 };
 
 struct Atlas {
@@ -59,12 +61,20 @@ void set_atlas(std::shared_ptr<const Atlas> atlas);
 void show(std::vector<Quad> quads, double seconds, std::shared_ptr<const Scene> scene = nullptr,
           std::shared_ptr<const Window> window = nullptr);
 
+// The HUD layer: quads of their own atlas, drawn under the others (and
+// apart from them: title/gauge.cpp's gauges of added fighters, in any
+// mode, while Practice's panels come and go).
+void set_hud_atlas(std::shared_ptr<const Atlas> atlas);
+void show_hud(std::vector<Quad> quads, double seconds);
+
 // For the renderer.
 struct State {
     std::shared_ptr<const Atlas> atlas;
     std::shared_ptr<const std::vector<Quad>> quads; // null: nothing to draw
     std::shared_ptr<const Scene> scene;             // null: no solids
     std::shared_ptr<const Window> window;           // null: none
+    std::shared_ptr<const Atlas> hud_atlas;
+    std::shared_ptr<const std::vector<Quad>> hud_quads; // null: nothing to draw
 };
 State current(); // the quads, solids and window only while they are to be drawn
 // The windows shown lately, newest first: the frame the renderer renders

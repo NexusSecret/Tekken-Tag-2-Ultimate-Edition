@@ -22,6 +22,7 @@
 // the game.
 
 #include "title/framedata.h"
+#include "title/gauge.h"
 
 #include "cafe/input.h"
 #include "cafe/ppc_ops.h"
@@ -566,10 +567,9 @@ PPC_FUNC(sub_03ADB118) {
     sub_03ADB118_orig(ctx, base);
     close_submenu(ctx, base); // (left by closing the pause menu)
     update_texts(base, in_practice);
-    if (in_practice) {
-        const uint32_t fighters[2] = {active_fighter(base, 0), active_fighter(base, 1)};
-        title::framedata::fighters_frame(base, fighters);
-    }
+    const uint32_t fighters[2] = {active_fighter(base, 0), active_fighter(base, 1)};
+    title::gauge::fighters_frame(base, fighters);
+    if (in_practice) title::framedata::fighters_frame(base, fighters);
 }
 
 // SLOW MOTION: while the fighters are in play, the battle's frame (the
