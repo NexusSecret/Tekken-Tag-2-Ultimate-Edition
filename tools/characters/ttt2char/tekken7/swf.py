@@ -210,10 +210,11 @@ class Movie:
             sprite = self.characters[e['char']]
         return sprite, matrix
 
-    def flatten(self, sprite, frame, matrix=(1, 0, 0, 1, 0, 0), cx=((1,) * 4, (0,) * 4), blend=0, skip=()):
+    def flatten(self, sprite, frame, matrix=(1, 0, 0, 1, 0, 0), cx=((1,) * 4, (0,) * 4), blend=0, skip=(), fixed=None):
         """The pictures a sprite shows at a frame, bottom first: [(picture, matrix, cx, blend, clip rect or None)].
-        Nested sprites play their own timelines from where they were placed (looping); masks (clip layers) are taken
-        as their bounding rectangles; instances named in `skip` are left out."""
+        Nested sprites play their own timelines from where they were placed (looping), those named in `fixed` ({name:
+        frame}) stay at that frame (a clip the game's code sets); masks (clip layers) are taken as their bounding
+        rectangles; instances named in `skip` are left out."""
         out = []
         masks = []                                  # (clip depth, rect)
         shown = self.display(sprite, frame)
@@ -239,7 +240,8 @@ class Movie:
                 out.append((ch, m, c, b, clip))
             elif isinstance(ch, Sprite):
                 n = len(ch.frames)
-                for pic, mm, cc, bb, cl in self.flatten(ch, (frame - e['since']) % n if n else 0, m, c, b, skip):
+                at = fixed[e['name']] if fixed and e['name'] in fixed else (frame - e['since']) % n if n else 0
+                for pic, mm, cc, bb, cl in self.flatten(ch, at, m, c, b, skip, fixed):
                     if clip is not None:
                         cl = clip if cl is None else (max(clip[0], cl[0]), max(clip[1], cl[1]),
                                                       min(clip[2], cl[2]), min(clip[3], cl[3]))

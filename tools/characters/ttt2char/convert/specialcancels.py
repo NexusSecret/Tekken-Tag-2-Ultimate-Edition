@@ -222,8 +222,10 @@ def buffered_special(c, source, targets):
             allowed = {346, 49, 50, 353, 0x81c8, 0x8069, 0x8068}
             if c.defn.MOVESET.get('free_meter_specials'):
                 allowed.add(629)
-            if c.defn.MOVESET.get('free_max_mode'):
+            if c.defn.MOVESET.get('free_max_mode') or gauged:
                 allowed.add(176)
+            if gauged:
+                allowed.add(629)
             if any(a not in allowed or (a in (49, 50, 176) and b != 0)
                    or (a == 353 and b != 1) for a, b in values):
                 raise ValueError('unsupported special dispatch gates: ' + source)
@@ -234,6 +236,8 @@ def buffered_special(c, source, targets):
             checks.append((CONTACT_VAR, 1))
         if meter is not None and gauged:
             checks.append((G.AT_LEAST, meter))
+        if (176, 0) in values and gauged and c.game == 't7':     # Geese's MAX mode
+            checks.append((G.MAX_ON, 0))
         dispatch.append(dict(row, req=req(checks),
                              extradata=extra(0x182), move_id=c.newidx[target],
                              win_end=min(32767, row['win_end'] + late), start_frame=1, option=0))
@@ -248,7 +252,7 @@ def buffered_special(c, source, targets):
             continue
         if c.defn.MOVESET.get('strict_special_cancel_gates'):
             allowed = {346, 0x80c5, 0x822b}
-            if c.defn.MOVESET.get('free_max_mode'):
+            if c.defn.MOVESET.get('free_max_mode') or gauged:
                 allowed.add(176)
             if any(a not in allowed or (a in (346, 176) and b != 0)
                    or (a == 0x822b and b != 1) for a, b in values):
@@ -263,8 +267,9 @@ def buffered_special(c, source, targets):
                 c.cache[key] = c.add('input_sequences', dict(
                     original, window=max(original['window'], motion_window)))
             sequence = c.cache[key]
+        max_mode = [(G.MAX_ON, 0)] if (176, 0) in values and gauged and c.game == 't7' else []
         captures.append(dict(row, direction=SEQ0 + sequence if is_sequence else row['direction'],
-                             req=req([(SPECIAL_VAR, 0), (SPECIAL_SET, code)]),
+                             req=req([(SPECIAL_VAR, 0)] + max_mode + [(SPECIAL_SET, code)]),
                              extradata=extra(0x2800), move_id=0x8001,
                              # A few strings capture well before dispatch;
                              # allow late motions throughout the dispatch window.

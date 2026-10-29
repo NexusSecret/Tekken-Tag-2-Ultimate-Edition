@@ -8,14 +8,18 @@ the attacker's) in percent of the damage, hud=the HUD movie's object path). Fact
   it to 0 .. its most (+0xccc);
 * property 0x8228 (value 1): the move gains no gauge for its attacks (+0x6b4, read by the gains); 0x8229: the fighter
   lights up (an EX move, a Focus cancel);
-* the gains (0x140713f72): Akuma 37 / 75 / 112 / 225, Geese 21 / 85 / 63 / 255, everyone else 50 / 100 / 150 / 300.
+* the gains (0x140713f72): Akuma 37 / 75 / 112 / 225, Geese 21 / 85 / 63 / 255, everyone else 50 / 100 / 150 / 300;
+* Geese's MAX mode: 176 tests its timer (+0xcd8) running, 0x82a9 adds frames to it (at most 720); no gains meanwhile.
 """
 # the runtime's requirements: ids no TTT2 moveset uses that TTT2's requirement function takes as false, below 643 (TTT2
 # marks cancel rows testing 643 and above as special ones, never tested for a player: sub_040D2300)
-AT_LEAST, BELOW = 190, 191
+AT_LEAST, BELOW, MAX_ON = 190, 191, 192
 ADD, NO_GAIN, FLASH = 0x8220, 0x8222, 0x8223  # the runtime's properties (TTT2's interpreter passes over them)
-REQS = {'t7': {629: AT_LEAST, 635: BELOW}, 't8': {}}
-PROPS = {'t7': {0x81c2: ADD, 0x8228: NO_GAIN, 0x8229: FLASH}, 't8': {}}
+MAX_ADD = 0x8224
+# Geese's MAX mode (Tekken 7: the timer at player +0xcd8): 176 tests it running, 0x82a9 adds frames to it (activation
+# 720, the MAX cancel dash 360; EX moves -160, his supers -720), capped at 720 (0x1434df508)
+REQS = {'t7': {629: AT_LEAST, 635: BELOW, 176: MAX_ON}, 't8': {}}
+PROPS = {'t7': {0x81c2: ADD, 0x8228: NO_GAIN, 0x8229: FLASH, 0x82a9: MAX_ADD}, 't8': {}}
 
 
 def of(defn):
@@ -41,8 +45,19 @@ SIDES = (('L', 'EX_mc.EX_L_mc'), ('R', 'EX_mc.EX_R_mc'))
 CLIPS = (('base', 'EXBase_%s_mc'), ('slot0', 'ExGauge_%s2_mc'), ('slot1', 'ExGauge_%s1_mc'), ('cover', 'EXGauge_cover_mc'),
          ('text', 'EXText_%s_mc'), ('light', 'EXLight_%s_mc'), ('lightning', 'EXLightning_%s_mc'),
          ('focus', 'EXFocus_%s_mc'))
-BAR, MASK = 'Bar_mc', 'BarMask_mc'
-TRAVEL = 154                    # a slot's bar's way from empty to full (the HUD code's 0x9a)
+# each bar: (bar number, the clip it is in, its path in there, its mask's path); a bar moves along its mask's width
+BARS = ((0, 'ExGauge_%s2_mc', 'Bar_mc', 'BarMask_mc'), (1, 'ExGauge_%s1_mc', 'Bar_mc', 'BarMask_mc'))
+# Geese's (SW_UI_HUD_Rage_MRY, SwfHUDMRYGauge in Tekken 7, 0x1404c7520): a power bar showing the stock being filled
+# (424 pixels a stock) with their count beside it (EXNum: Num_01_mc / Num_02_mc at frame n, Up / Down as it changes),
+# ExGauge1_MAX and MAXIMUM when every stock is full, the MAX mode timer's bar with MAXMODE while it runs, POWER (an
+# unnamed placement)
+POWER_CLIPS = (('static', None), ('base1', 'EXBase1_%s_mc'), ('gauge1', 'ExGauge1_%s_mc'), ('max1', 'ExGauge1_MAX_%s_mc'),
+               ('text1', 'ExText1_%s_mc'), ('base2', 'EXBase2_%s_mc'), ('gauge2', 'ExGauge2_%s_mc'),
+               ('text2', 'ExText2_%s_mc'), ('focus', 'EXFocus_%s_mc')) + \
+    tuple(('num%d' % n, 'EXNum_%s_mc') for n in range(6))
+POWER_BARS = ((0, 'ExGauge1_%s_mc', 'BarEX1_mc', 'BarMask_mc'),
+              (1, 'ExGauge2_%s_mc', 'BarEX2_%s_mc.BarEX2Body_mc', 'BarEX2_%s_mc.BarEX2Mask_mc'))
+NUMBERS = ('Num_01_mc', 'Num_02_mc')
 ATLAS_WIDTH = 2048
 BIG = 512                       # pictures larger than this are kept at half their size (glows),
 EFFECTS = {'light', 'lightning', 'focus'}       # as are those only these clips show (bats, flares: soft anyway)
@@ -115,34 +130,69 @@ def hud_files(paks, defn, log=print):
             x0, x1, y0, y1, u0, u1, v0, v1 = nx0, nx1, ny0, ny1, fx0, fx1, fy0, fy1
         return x0, y0, x1, y1, u0, v0, u1, v1
 
-    out = []                    # (kind, fields...) with pictures by name, placed in the atlas at the end
+    power = any(e['name'] == 'EXNum_L_mc' for e in movie.display(movie.find('EX_mc.EX_L_mc')[0], 0).values())
+    clips, bars = (POWER_CLIPS, POWER_BARS) if power else (CLIPS, BARS)
+    skips = tuple(inside.split('.')[-1] for _, _, inside, _ in bars)
+
+    def child(sprite, matrix, path):
+        """The (entry, matrix) a dotted instance path names inside a sprite at its first frame."""
+        e = None
+        for name in path.split('.'):
+            e = next((x for x in movie.display(sprite, 0).values() if x['name'] == name), None)
+            if e is None:
+                return None, None
+            matrix = swf.concat(matrix, e['matrix'])
+            sprite = movie.characters[e['char']]
+        return e, matrix
+
+    out = [('style', 'power' if power else 'ex')]   # (kind, fields...) with pictures by name, in the atlas at the end
     for side, side_path in SIDES:
         side_sprite, side_matrix = movie.find(side_path)
-        for clip, instance in CLIPS:
-            name = instance % side if '%s' in instance else instance
-            shown = movie.display(side_sprite, 0)
+        shown = movie.display(side_sprite, 0)
+        for k, instance, inside, mask_path in bars:
+            e = next((x for x in shown.values() if x['name'] == instance % side), None)
+            if e is None:
+                continue
+            matrix = swf.concat(side_matrix, e['matrix'])
+            sprite = movie.characters[e['char']]
+            bar, bar_matrix = child(sprite, matrix, inside % side if '%s' in inside else inside)
+            mask, mask_matrix = child(sprite, matrix, mask_path % side if '%s' in mask_path else mask_path)
+            if bar is None or mask is None:
+                raise ValueError('%s has no %s / %s' % (instance % side, inside, mask_path))
+            rect = movie.bounds(movie.characters[mask['char']], mask_matrix)
+            placed = [(pic, quad(pic, m, None)) for pic, m, cx, blend, _ in
+                      movie.flatten(movie.characters[bar['char']], 0, bar_matrix)]
+            placed = [(pic, q) for pic, q in placed if q]
+            if placed:                              # the bar itself (the widest: Geese's bars carry a sheen too)
+                pic, q = max(placed, key=lambda pq: abs(pq[1][2] - pq[1][0]))
+                used[pic.name] = pic
+                clips_of.setdefault(pic.name, set()).add('bar')
+                out.append(('bar', side, k, pic.name) + q)
+            out.append(('mask', side, k) + rect + (1 if side == 'L' else -1,))
+        for clip, instance in clips:
+            name = instance % side if instance and '%s' in instance else instance
             entries = [shown[d] for d in sorted(shown) if shown[d]['name'] == name]   # (a clip placed again over itself)
             if not entries:
                 continue
+            fixed = {n: int(clip[3:]) for n in NUMBERS} if clip.startswith('num') else None
+            if instance is None:                    # the unnamed placements, as one still clip
+                out.append(('clip', side, clip, 1))
+                out.append(('frame', side, clip, 0))
+                for e in entries:
+                    ch = movie.characters[e['char']]
+                    sub = movie.flatten(ch, 0, swf.concat(side_matrix, e['matrix']), e['cx'], e['blend']) \
+                        if isinstance(ch, swf.Sprite) else \
+                        [(ch, swf.concat(side_matrix, e['matrix']), e['cx'], e['blend'], None)]
+                    for pic, m, cx, blend, cl in sub:
+                        q = quad(pic, m, cl) if isinstance(pic, swf.Picture) else None
+                        if q and cx[0][3] > 0:
+                            used[pic.name] = pic
+                            clips_of.setdefault(pic.name, set()).add(clip)
+                            out.append(('q', pic.name) + q + (_hex(cx[0]), _hex(cx[1][:3] + (0,))[:6],
+                                                              'FF' if blend == swf.BLEND_ADD else '00'))
+                continue
             entry = entries[0]
             sprite = movie.characters[entry['char']]
-            matrix = swf.concat(side_matrix, entry['matrix'])
-            if clip.startswith('slot'):
-                k = int(clip[4:])
-                shown = movie.display(sprite, 0)
-                bar = next((e for e in shown.values() if e['name'] == BAR), None)
-                mask = next((e for e in shown.values() if e['name'] == MASK and e['clip']), None)
-                if bar is None or mask is None:
-                    raise ValueError('%s has no %s / %s' % (name, BAR, MASK))
-                rect = movie.bounds(movie.characters[mask['char']], swf.concat(matrix, mask['matrix']))
-                for pic, m, cx, blend, _ in movie.flatten(movie.characters[bar['char']], 0,
-                                                          swf.concat(matrix, bar['matrix'])):
-                    q = quad(pic, m, None)
-                    if q:
-                        used[pic.name] = pic
-                        clips_of.setdefault(pic.name, set()).add(clip)
-                        out.append(('bar', side, k, pic.name) + q)
-                out.append(('mask', side, k) + rect + (1 if side == 'L' else -1,))
             out.append(('clip', side, clip, len(sprite.frames)))
             for label, first in sorted(sprite.labels.items(), key=lambda x: x[1]):
                 later = [f for f in sprite.labels.values() if f > first]
@@ -152,7 +202,7 @@ def hud_files(paks, defn, log=print):
                 placed = []
                 for e in entries:
                     placed += movie.flatten(movie.characters[e['char']], f, swf.concat(side_matrix, e['matrix']),
-                                            e['cx'], e['blend'], skip=(BAR,))
+                                            e['cx'], e['blend'], skip=skips, fixed=fixed)
                 for pic, m, cx, blend, cl in placed:
                     q = quad(pic, m, cl)
                     if q is None:
@@ -186,9 +236,11 @@ def hud_files(paks, defn, log=print):
     lines = ['# %s\'s gauge as Tekken 7 shows it (%s), made on this machine from the player\'s own copy' % (
         defn.NAME, path.rsplit('/', 1)[1]),
         '# positions on Tekken 7\'s 1920 x 1080 screen; pictures by their texels in gauge.nut',
-        'atlas %d %d' % (ATLAS_WIDTH, height), 'travel %d' % TRAVEL]
+        'atlas %d %d' % (ATLAS_WIDTH, height)]
     for o in out:
-        if o[0] == 'bar':
+        if o[0] == 'style':
+            lines.append('style %s' % o[1])
+        elif o[0] == 'bar':
             _, side, k, name, x0, y0, x1, y1, u0, v0, u1, v1 = o
             lines.append('bar %s %d %.2f %.2f %.2f %.2f %s' % (side, k, x0, y0, x1, y1, uv(name, u0, v0, u1, v1)))
         elif o[0] == 'mask':

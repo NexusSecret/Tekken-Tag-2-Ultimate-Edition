@@ -1312,7 +1312,7 @@ carries the colour grid and both palettes). The pack holds Namco's assets:
 the importer refuses to write it inside this repository, and `.gitignore`
 keeps the games' file types out.
 
-Tekken 7's 2D fighters' gauges (Akuma's and Eliza's; `GAUGE` in a definition,
+Tekken 7's 2D fighters' gauges (Akuma's, Eliza's, Geese's; `GAUGE` in a definition,
 `convert/gauge.py`, `title/gauge.cpp`): Tekken 7 keeps the gauge in its
 executable, the moveset only tests it (requirement 629: at least `param`,
 635: less) and changes it (0x81c2 adds its value: EX moves -500, supers
@@ -1336,6 +1336,15 @@ full, the gauge spent) on the overlay's HUD layer, the slots' bars moved
 along their masks, while the fighters' round phase (player +2048) is past
 its intro. The pictures shown only in the glow and lightning clips (Eliza's
 bats and flares) are kept at half size, the sheet as BC3.
+Geese's gauge holds three stocks and has Tekken 7's MAX mode: 1+2+3 spends
+a stock and starts a timer (player +0xcd8: at most 720 frames, one less a
+frame; requirement 176 tests it running, 0x82a9 adds to it) that his EX
+moves need and shorten, his supers end, and while it runs he builds no
+gauge; the port's ids are requirement 192 and property 0x8224. His HUD is
+his own movie's (SW_UI_HUD_Rage_MRY, played as Tekken 7's SwfHUDMRYGauge
+does): a power bar for the stock being filled with the stock count beside
+it (the count's clip baked once per number), MAXIMUM when every stock is
+full, the MAX timer's bar with MAXMODE while it runs.
 
 ## The launcher
 

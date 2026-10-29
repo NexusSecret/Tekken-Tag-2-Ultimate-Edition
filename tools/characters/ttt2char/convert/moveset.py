@@ -480,6 +480,7 @@ class Converter:
     game, end, prefix = 't7', T7_END, None
     linking = 0                         # > 0 while the links of the fighter's own (or converted) moves are made
     gauge = None                        # the definition's GAUGE (convert/gauge.py), set by __init__
+    true_reqs = frozenset()             # (requirement, parameter) pairs true by the definition, set by __init__
     _fit = None                         # FIT's ranges: {'req' / 'prop': {TTT2 id: (lowest, highest)}}, when needed
 
     def __init__(self, k, h7, donor, donor_pack, h2, common_motions, maps, usage, newid, d):
@@ -590,6 +591,9 @@ class Converter:
         for j, e in enumerate(T['cancel_extras']):
             self.extra_index.setdefault(e['value'], j)
         self.gauge = G.of(d)            # Tekken 7's gauge kept (convert/gauge.py): its EX moves too
+        # (requirement, parameter) pairs the definition knows true for the fighter (Geese's MAX activation tests
+        # Tekken 7's variable 9, which nothing he does sets)
+        self.true_reqs = set(d.MOVESET.get('true_requirements', ()))
         dropped = DROP_MOVES.replace(r'|_EX\d?$', '') if d.MOVESET.get('free_meter_specials') or self.gauge \
             else DROP_MOVES
         self.drop_moves = re.compile('|'.join([dropped] + ([d.MOVESET['drop_moves']] if d.MOVESET.get('drop_moves')
@@ -851,6 +855,9 @@ class Converter:
         g = self.game
         rows, res = [], None
         for c, p, row in self.req_rows(i):
+            if (c, p) in self.true_reqs:
+                self.stats['requirements true by the definition'] += 1
+                continue
             if g == 't7' and c == 176 and p == 0 and self.defn.MOVESET.get('free_max_mode'):
                 self.stats['MAX mode requirements removed (opt-in)'] += 1
                 continue

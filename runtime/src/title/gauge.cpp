@@ -74,6 +74,10 @@ constexpr int kFlashFrames = 18, kFlashHold = 4;
 constexpr float kYellow[3] = {2.4f, 2.0f, 0.35f};
 
 constexpr float kScale = gpu::overlay::kWidth / 1920.0f; // Tekken 7's HUD is 1920 x 1080
+// Geese's MAX mode (Tekken 7's player +0xcd8, in hundredths of a frame): at
+// most 720 frames (0x1434df508, set at start-up), one less every frame
+// (0x14078e1e4); the fighter builds no gauge while it runs (0x140714138).
+constexpr int32_t kMaxTimer = 720;
 // Tekken 7 draws it at its screen's bottom, where the title has its own
 // texts (Arcade's stage and time, Promotion Chance): a little higher here;
 // in Practice above the frame data panels, when they show.
@@ -105,10 +109,11 @@ struct Bar {
 struct Side {
     std::map<std::string, Clip> clips;
     Bar bars[kMaxSlots];
+    float left = 0, bottom = 0; // the panel's (its bars' and resting clips': moved above / beside Practice's)
 };
 struct Hud {
     Side sides[2];
-    float travel = 154;
+    bool power = false;    // Geese's power gauge (else Akuma's / Eliza's slots)
     Rgba image;            // gauge.nut's picture
     uint32_t atlas_y = 0;  // where it is in the HUD layer's atlas
 };
@@ -143,7 +148,9 @@ struct Player {
     // the HUD
     int32_t shown = -1;        // the value drawn last (-1: none yet)
     int full = 0;              // its stocks full then
-    Play base, slots[kMaxSlots], cover, text, light, lightning, focus;
+    bool max_shown = false;    // the MAX mode drawn then
+    std::map<std::string, Play> plays; // the clips', by name
+    int32_t max_timer = 0;     // Geese's MAX mode: frames left
 };
 std::map<uint32_t, Player> g_players; // by fighter
 
@@ -190,8 +197,10 @@ std::optional<Hud> read_hud(const fs::path& directory) {
         std::istringstream s(line);
         std::string kind, side_name, clip;
         if (!(s >> kind)) continue;
-        if (kind == "travel") {
-            s >> hud.travel;
+        if (kind == "style") {
+            std::string style;
+            s >> style;
+            hud.power = style == "power";
             continue;
         }
         if (kind == "q") {
@@ -205,7 +214,7 @@ std::optional<Hud> read_hud(const fs::path& directory) {
             int k;
             if (!(s >> k) || k < 0 || k >= kMaxSlots) continue;
             Bar& bar = side.bars[k];
-            if (kind == "bar") bar.present = read_picture(s, bar.picture);
+            if (kind == "bar" && !bar.present) bar.present = read_picture(s, bar.picture);
             else s >> bar.mask[0] >> bar.mask[1] >> bar.mask[2] >> bar.mask[3] >> bar.slide;
         } else if (kind == "clip") {
             size_t frames = 0;
@@ -219,6 +228,17 @@ std::optional<Hud> read_hud(const fs::path& directory) {
             frame = nullptr;
             if (s >> clip >> n && n < side.clips[clip].frames.size()) frame = &side.clips[clip].frames[n];
         }
+    }
+    for (Side& side : hud.sides) { // the panel's extent at rest
+        side.left = 1e9f, side.bottom = 0;
+        const auto take = [&](const Picture& p) {
+            side.left = std::min({side.left, p.x0, p.x1}), side.bottom = std::max({side.bottom, p.y0, p.y1});
+        };
+        for (const Bar& bar : side.bars)
+            if (bar.present) take(bar.picture);
+        for (const char* name : {"base", "base1", "static", "num0"})
+            if (const auto it = side.clips.find(name); it != side.clips.end() && !it->second.frames.empty())
+                for (const Picture& p : it->second.frames.back()) take(p); // (Geese's: its last, "Stay")
     }
     return hud;
 }
@@ -318,73 +338,138 @@ void add_clip(std::vector<gpu::overlay::Quad>& out, const Hud& hud, const Side& 
     for (const Picture& p : frames[std::clamp<size_t>(play.frame, 0, frames.size() - 1)]) add_quad(out, hud, p);
 }
 
-void draw(std::vector<gpu::overlay::Quad>& out, const Hud& hud, const Config& config, Player& p, int s) {
-    const Side& side = hud.sides[s];
-    const int stocks = std::clamp(config.max / std::max(1, config.stock), 1, kMaxSlots);
-    const int32_t value = p.value;
-    const int full = std::min(stocks, value / std::max(1, config.stock));
-    const auto clip = [&](const char* name) -> const Clip& {
+// A bar `fill` (0 to 1) along its mask, from where it starts.
+void add_bar(std::vector<gpu::overlay::Quad>& out, const Hud& hud, const Bar& bar, float fill) {
+    if (!bar.present || fill <= 0) return;
+    Picture moved = bar.picture;
+    const float dx = (std::min(fill, 1.0f) - 1) * std::fabs(bar.mask[2] - bar.mask[0]) * bar.slide;
+    moved.x0 += dx, moved.x1 += dx;
+    add_quad(out, hud, moved, bar.mask);
+}
+
+// Akuma's and Eliza's: a slot per stock, lit when full (CSwfHUDRage, BSwfHUDELZGauge).
+void plays_ex(const Side& side, const Config& config, Player& p) {
+    const auto clip = [&](const std::string& name) -> const Clip& {
         static const Clip none;
         const auto it = side.clips.find(name);
         return it == side.clips.end() ? none : it->second;
     };
-    const char* const slot_names[kMaxSlots] = {"slot0", "slot1", "slot2", "slot3"};
+    const auto play = [&](const std::string& name) -> Play& { return p.plays[name]; };
+    const int stocks = std::clamp(config.max / std::max(1, config.stock), 1, kMaxSlots);
+    const int full = std::min(stocks, p.value / std::max(1, config.stock));
+    const auto slot = [](int k) { return "slot" + std::to_string(k); };
     if (p.shown < 0) { // a new fighter or match: the clips as the gauge is
-        p.base.still(0), p.cover.still(0), p.text.still(0);
-        p.light.hide(), p.focus.hide(), p.lightning.hide(); // (their first frames are their effects)
-        for (Play& slot : p.slots) slot.still(0);
+        for (const char* name : {"base", "cover", "text"}) play(name).still(0);
+        for (const char* name : {"light", "focus", "lightning"}) play(name).hide(); // (their first frames: effects)
+        for (int k = 0; k < stocks; ++k) play(slot(k)).still(0);
         p.full = 0;
     }
     if (full != p.full) {
         if (full == stocks) { // every slot: EX_MAX_02, then Super looped
-            for (int k = 0; k < stocks; ++k) {
-                const Clip& c = clip(slot_names[k]);
-                p.slots[k].run(c.label("EX_MAX_02"), c.label("Super"), true);
-            }
-            p.base.run(clip("base").label("Super"), clip("base").label("Super"), true);
-            p.text.run(clip("text").label("Super"), clip("text").label("Super"), true);
-            p.lightning.run(clip("lightning").label("On"), clip("lightning").label("On"), true);
+            for (int k = 0; k < stocks; ++k) play(slot(k)).run(clip(slot(k)).label("EX_MAX_02"), clip(slot(k)).label("Super"), true);
+            for (const char* name : {"base", "text"}) play(name).run(clip(name).label("Super"), clip(name).label("Super"), true);
+            play("lightning").run(clip("lightning").label("On"), clip("lightning").label("On"), true);
         } else {
             for (int k = 0; k < stocks; ++k) {
-                const Clip& c = clip(slot_names[k]);
-                if (k >= full) p.slots[k].still(0);
+                const Clip& c = clip(slot(k));
+                if (k >= full) play(slot(k)).still(0);
                 else if (k >= p.full || p.full == stocks) { // newly full (or no longer every one): lit
                     const auto max1 = c.label("EX_MAX_01");
-                    p.slots[k].run(c.label("EX"), max1.first >= 0 ? max1 : c.label("EX"), false);
+                    play(slot(k)).run(c.label("EX"), max1.first >= 0 ? max1 : c.label("EX"), false);
                 }
             }
-            p.base.still(0);
-            p.lightning.hide();
-            if (full == 0) p.text.still(0);
-            else p.text.run(clip("text").label("EX"), clip("text").label("EX"), false);
+            play("base").still(0);
+            play("lightning").hide();
+            if (full == 0) play("text").still(0);
+            else play("text").run(clip("text").label("EX"), clip("text").label("EX"), false);
         }
-        if (full > p.full) p.light.run(clip("light").label("Start"), clip("light").label("Start"), false);
+        if (full > p.full) play("light").run(clip("light").label("Start"), clip("light").label("Start"), false);
     }
-    if (p.shown >= 0 && value < p.shown) p.focus.run(clip("focus").label("Start"), clip("focus").label("Start"), false);
     p.full = full;
-    p.shown = value;
+}
 
-    add_clip(out, hud, side, "base", p.base);
-    for (int k = 0; k < stocks; ++k) {
-        const Bar& bar = side.bars[k];
-        const float fill = std::clamp(float(value - k * config.stock) / float(config.stock), 0.0f, 1.0f);
-        if (bar.present && fill > 0) {
-            Picture moved = bar.picture;
-            const float dx = (fill - 1) * hud.travel * bar.slide;
-            moved.x0 += dx, moved.x1 += dx;
-            add_quad(out, hud, moved, bar.mask);
-        }
-        add_clip(out, hud, side, slot_names[k], p.slots[k]);
+// Geese's: a power bar for the stock being filled with their count beside it, MAXIMUM when they are all full, the
+// MAX mode's timer and MAXMODE (SwfHUDMRYGauge, 0x1404c7520: 424 pixels a stock).
+void plays_power(const Side& side, const Config& config, Player& p) {
+    const auto clip = [&](const std::string& name) -> const Clip& {
+        static const Clip none;
+        const auto it = side.clips.find(name);
+        return it == side.clips.end() ? none : it->second;
+    };
+    const auto play = [&](const std::string& name) -> Play& { return p.plays[name]; };
+    const auto stay = [&](const std::string& name) { play(name).run(clip(name).label("Start"), clip(name).label("Stay"), false); };
+    const int stocks = std::max(1, config.max / std::max(1, config.stock));
+    const int count = std::min(5, p.value / std::max(1, config.stock));
+    const bool max_on = p.max_timer > 0;
+    if (p.shown < 0) {
+        for (const char* name : {"static", "gauge1"}) play(name).still(0);
+        stay("base1");
+        for (const char* name : {"max1", "text1", "base2", "gauge2", "text2", "focus"}) play(name).hide();
+        p.full = -1, p.max_shown = false; // (a full gauge's MAXIMUM shows from the start)
     }
-    add_clip(out, hud, side, "cover", p.cover);
-    add_clip(out, hud, side, "text", p.text);
-    add_clip(out, hud, side, "light", p.light);
-    add_clip(out, hud, side, "lightning", p.lightning);
-    add_clip(out, hud, side, "focus", p.focus);
-    for (Play* play : {&p.base, &p.text, &p.light, &p.lightning, &p.focus}) play->step();
-    for (Play& play : p.slots) play.step();
-    if (p.light.frame >= p.light.last && p.light.next_first < 0) p.light.hide();
-    if (p.focus.frame >= p.focus.last && p.focus.next_first < 0) p.focus.hide();
+    for (int n = 0; n <= 5; ++n) // the count shown: its own clip (the number set in it)
+        if (n != count) play("num" + std::to_string(n)).hide();
+    Play& number = play("num" + std::to_string(count));
+    if (count != p.full || number.hidden) {
+        const auto& c = clip("num" + std::to_string(count));
+        if (count == p.full) number.still(0);
+        else if (p.full < 0) number.still(0);
+        else number.run(c.label(count > p.full ? "Up" : "Down"), c.label(count > p.full ? "Up" : "Down"), false);
+        if (count >= stocks && p.full < stocks) {
+            play("max1").run(clip("max1").label("Normal"), clip("max1").label("Normal"), true);
+            stay("text1");
+        } else if (count < stocks) {
+            play("max1").hide(), play("text1").hide();
+        }
+    }
+    if (max_on != p.max_shown) {
+        if (max_on) {
+            stay("base2"), stay("text2");
+            play("gauge2").run(clip("gauge2").label("Normal"), clip("gauge2").label("Normal"), true);
+        } else {
+            for (const char* name : {"base2", "gauge2", "text2"}) play(name).hide();
+        }
+    }
+    p.full = count, p.max_shown = max_on;
+}
+
+void draw(std::vector<gpu::overlay::Quad>& out, const Hud& hud, const Config& config, Player& p, int s) {
+    const Side& side = hud.sides[s];
+    const int32_t value = p.value;
+    if (hud.power) plays_power(side, config, p);
+    else plays_ex(side, config, p);
+    if (p.shown >= 0 && value < p.shown) {
+        const auto it = side.clips.find("focus");
+        if (it != side.clips.end()) p.plays["focus"].run(it->second.label("Start"), it->second.label("Start"), false);
+    }
+    p.shown = value;
+    const auto clip = [&](const std::string& name) { add_clip(out, hud, side, name.c_str(), p.plays[name]); };
+    if (hud.power) {
+        const int stock = std::max(1, config.stock);
+        const float fill = value >= config.max ? 1.0f : float(value % stock) / float(stock);
+        clip("base1");
+        add_bar(out, hud, side.bars[0], fill);
+        for (const char* name : {"gauge1", "max1", "text1", "base2"}) clip(name);
+        add_bar(out, hud, side.bars[1], float(p.max_timer) / float(kMaxTimer));
+        for (const char* name : {"gauge2", "text2"}) clip(name);
+        for (int n = 0; n <= 5; ++n) clip("num" + std::to_string(n));
+        clip("static");
+        clip("focus");
+    } else {
+        const int stocks = std::clamp(config.max / std::max(1, config.stock), 1, kMaxSlots);
+        clip("base");
+        for (int k = 0; k < stocks; ++k) {
+            add_bar(out, hud, side.bars[k],
+                    std::clamp(float(value - k * config.stock) / float(config.stock), 0.0f, 1.0f));
+            clip("slot" + std::to_string(k));
+        }
+        for (const char* name : {"cover", "text", "light", "lightning", "focus"}) clip(name);
+    }
+    for (auto& [name, play] : p.plays) {
+        play.step();
+        // effects that ran once go
+        if ((name == "light" || name == "focus") && play.frame >= play.last && play.next_first < 0) play.hide();
+    }
 }
 
 } // namespace
@@ -410,6 +495,10 @@ void configure(int slot, const Config& config, const fs::path& pack) {
 }
 
 bool requirement(uint32_t address, int slot, uint32_t kind, uint32_t param, bool& result) {
+    if (kind == kMaxOn) { // (Tekken 7's 176 tests the timer > 0 whatever its parameter)
+        result = fighter_of(slot) && player(address, slot).max_timer > 0;
+        return true;
+    }
     if (kind != kAtLeast && kind != kBelow) return false;
     const Fighter* f = fighter_of(slot);
     const int32_t value = f ? player(address, slot).value : 0;
@@ -426,7 +515,7 @@ bool requirement(uint32_t address, int slot, uint32_t kind, uint32_t param, bool
 }
 
 bool property(uint32_t address, int slot, uint32_t id, uint32_t value) {
-    if (id != kAdd && id != kNoGain && id != kFlash) return false;
+    if (id != kAdd && id != kNoGain && id != kFlash && id != kMaxAdd) return false;
     const Fighter* f = fighter_of(slot);
     if (!f) return true;
     Player& p = player(address, slot);
@@ -434,6 +523,10 @@ bool property(uint32_t address, int slot, uint32_t id, uint32_t value) {
         p.value = clamp(p.value + static_cast<int32_t>(value), f->config.max);
         if (std::getenv("TTT2_TRACE_GAUGE"))
             std::fprintf(stderr, "ttt2: gauge: %08X %+d -> %d\n", address, static_cast<int32_t>(value), p.value);
+    } else if (id == kMaxAdd) {
+        p.max_timer = std::clamp(p.max_timer + static_cast<int32_t>(value), 0, kMaxTimer);
+        if (std::getenv("TTT2_TRACE_GAUGE"))
+            std::fprintf(stderr, "ttt2: gauge: %08X MAX %+d -> %d\n", address, static_cast<int32_t>(value), p.max_timer);
     } else if (id == kNoGain) {
         p.no_gain_move = value ? ppc::ld32(guest_base(), address + kMove) : 0;
     } else {
@@ -446,6 +539,7 @@ void situation(uint32_t kind) {
     // Tekken 7's start kinds (0x140759a50's table): a round's keep the gauge
     static constexpr uint32_t kKeep[] = {4, 5, 6, 7, 8, 9, 10, 16, 18};
     if (std::getenv("TTT2_TRACE_GAUGE")) std::fprintf(stderr, "ttt2: gauge: situation %u\n", kind);
+    for (auto& [address, p] : g_players) p.max_timer = 0; // (a round's start ends a MAX mode)
     if (std::find(std::begin(kKeep), std::end(kKeep), kind) != std::end(kKeep)) return;
     for (auto& [address, p] : g_players) {
         p.value = start_value();
@@ -492,10 +586,11 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
         const int32_t damage = blocked ? static_cast<int32_t>(ppc::ld32(base, defender + kHitDamage)) : lost;
         if (damage <= 0) continue;
         const int32_t before[2] = {gains[0], gains[1]};
-        if (who[s]) gains[s] += damage * who[s]->config.gain[blocked ? 0 : 2] / 100;
+        if (who[s] && d.max_timer <= 0) gains[s] += damage * who[s]->config.gain[blocked ? 0 : 2] / 100;
         if (attacker && who[1 - s]) {
             Player& a = entry(attacker);
-            const bool no_gain = a.no_gain_move && a.no_gain_move == ppc::ld32(base, attacker + kMove);
+            const bool no_gain = (a.no_gain_move && a.no_gain_move == ppc::ld32(base, attacker + kMove)) ||
+                                 a.max_timer > 0;
             if (!no_gain) gains[1 - s] += damage * who[1 - s]->config.gain[blocked ? 1 : 3] / 100;
         }
         if (std::getenv("TTT2_TRACE_GAUGE"))
@@ -507,6 +602,9 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
         Player& p = player(fighters[s], slots[s]);
         p.value = clamp(p.value + gains[s], who[s]->config.max);
     }
+    // The MAX modes run down.
+    for (auto& [address, p] : g_players)
+        if (p.max_timer > 0) --p.max_timer;
     // The flashes.
     for (auto& [address, p] : g_players) {
         if (p.flash <= 0) continue;
@@ -527,16 +625,16 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
     for (int s = 0; s < 2; ++s) {
         if (!who[s] || !who[s]->hud) continue;
         g_raise = kRaise, g_shift = 0;
-        const auto& clips = who[s]->hud->sides[s].clips;
-        const auto base = clips.find("base");
-        float left = 1e9f, bottom = 0; // the panel's left and bottom
-        if (base != clips.end() && !base->second.frames.empty())
-            for (const Picture& pic : base->second.frames[0])
-                left = std::min({left, pic.x0, pic.x1}), bottom = std::max({bottom, pic.y0, pic.y1});
+        const float left = who[s]->hud->sides[s].left, bottom = who[s]->hud->sides[s].bottom;
         if (const float top = framedata::panels_top(s); top && bottom > 0)
             g_raise = std::max(kRaise, bottom - (top - kAbovePanels) / kScale);
         if (const float right = framedata::history_right(); right && s == 0 && left < 1e9f)
             g_shift = std::max(0.0f, (right + kBesideHistory) / kScale - left);
+        // (a frame Practice's panels are not reported, as Geese's MAX activation stops the game, keeps the place)
+        static struct { float raise = kRaise, shift = 0; std::chrono::steady_clock::time_point at; } kept[2];
+        const auto now = std::chrono::steady_clock::now();
+        if (g_raise != kRaise || g_shift != 0) kept[s] = {g_raise, g_shift, now};
+        else if (now - kept[s].at < std::chrono::milliseconds(500)) g_raise = kept[s].raise, g_shift = kept[s].shift;
         draw(quads, *who[s]->hud, who[s]->config, player(fighters[s], slots[s]), s);
     }
     gpu::overlay::show_hud(std::move(quads), 0.1);

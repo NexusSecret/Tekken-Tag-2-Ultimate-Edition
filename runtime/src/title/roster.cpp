@@ -3695,7 +3695,7 @@ PPC_FUNC(sub_03AE86A0_orig);
 PPC_FUNC(sub_03AE86A0) { // a move property (player r3, {id, value} r4, pass r5)
     const uint32_t player = ctx.r[3], id = load(ctx.r[4]);
     // (each property comes twice, pass 1 then 0: acted on once)
-    if ((id == gauge::kAdd || id == gauge::kNoGain || id == gauge::kFlash) &&
+    if ((id == gauge::kAdd || id == gauge::kNoGain || id == gauge::kFlash || id == gauge::kMaxAdd) &&
         (ctx.r[5] != 0 || gauge::property(player, added_slot(player), id, load(ctx.r[4] + 4))))
         return;
     if ((id == kArcProp || id == kArcBakedProp || id == kArcAirMoveProp) && ctx.r[5] == 0 &&
@@ -3724,7 +3724,7 @@ PPC_FUNC(sub_0404FF30_orig);
 PPC_FUNC(sub_0404FF30) {
     const uint32_t requirement = ctx.r[3], player = ctx.r[4];
     const uint32_t kind = load(requirement);
-    if (bool result; (kind == gauge::kAtLeast || kind == gauge::kBelow) &&
+    if (bool result; (kind == gauge::kAtLeast || kind == gauge::kBelow || kind == gauge::kMaxOn) &&
                      gauge::requirement(player, added_slot(player), kind, load(requirement + 4), result)) {
         ctx.r[3] = result;
         return;
