@@ -530,8 +530,9 @@ def restore_jump_specials(c):
             if not SEQ0 <= row['direction'] < SEQ0 + len(c.k.tables['input_sequences']):
                 raise ValueError('missing jump special input sequence: ' + name)
             # Original order prefers EX for 3+4; rising/falling branches share
-            # inputs. Keep one route per command, rather than overlapping it.
-            key = row['direction'], row['button']
+            # inputs. Keep one route per command, rather than overlapping it
+            # (and per gauge test: a gauged EX route falls back to the plain one).
+            key = row['direction'], row['button'], meter if gauged else None
             if key in seen:
                 continue
             seen.add(key)

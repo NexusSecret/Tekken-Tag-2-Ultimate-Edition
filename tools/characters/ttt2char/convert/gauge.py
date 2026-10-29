@@ -37,12 +37,15 @@ def ini_line(defn):
 # (0x1404c1b90 moves each slot's Bar_mc: a slot of 154 pixels per stock). The gauge fills from the screen's edge: the
 # first stock is the outer slot (ExGauge_L2_mc, R2), the second the one by EX / SUPER! (the user, who plays Tekken 7)
 SIDES = (('L', 'EX_mc.EX_L_mc'), ('R', 'EX_mc.EX_R_mc'))
-CLIPS = (('base', 'EXBase_%s_mc'), ('slot0', 'ExGauge_%s2_mc'), ('slot1', 'ExGauge_%s1_mc'), ('text', 'EXText_%s_mc'),
-         ('light', 'EXLight_%s_mc'), ('lightning', 'EXLightning_%s_mc'), ('focus', 'EXFocus_%s_mc'))
+# (Eliza's has no text; her outer slot has a cover, EXGauge_cover_mc, placed twice in both panels)
+CLIPS = (('base', 'EXBase_%s_mc'), ('slot0', 'ExGauge_%s2_mc'), ('slot1', 'ExGauge_%s1_mc'), ('cover', 'EXGauge_cover_mc'),
+         ('text', 'EXText_%s_mc'), ('light', 'EXLight_%s_mc'), ('lightning', 'EXLightning_%s_mc'),
+         ('focus', 'EXFocus_%s_mc'))
 BAR, MASK = 'Bar_mc', 'BarMask_mc'
 TRAVEL = 154                    # a slot's bar's way from empty to full (the HUD code's 0x9a)
 ATLAS_WIDTH = 2048
-BIG = 512                       # pictures larger than this are kept at half their size (glows)
+BIG = 512                       # pictures larger than this are kept at half their size (glows),
+EFFECTS = {'light', 'lightning', 'focus'}       # as are those only these clips show (bats, flares: soft anyway)
 
 
 def _movie(paks, path):
@@ -79,12 +82,12 @@ def hud_files(paks, defn, log=print):
     folder = path.rsplit('/', 1)[0]
     movie = _movie(paks, path)
     lines, used, rotated = [], {}, 0
-    images = {}
+    images, clips_of = {}, {}
 
     def picture(pic):
         if pic.name not in images:
             img = _picture(paks, folder, pic.name)
-            if max(img.shape[:2]) > BIG:
+            if max(img.shape[:2]) > BIG or clips_of.get(pic.name, set()) <= EFFECTS:
                 h, w = img.shape[:2]
                 img = img[:h - h % 2, :w - w % 2].reshape(h // 2, 2, w // 2, 2, 4).mean((1, 3)).astype(np.uint8)
             images[pic.name] = img
@@ -116,10 +119,12 @@ def hud_files(paks, defn, log=print):
     for side, side_path in SIDES:
         side_sprite, side_matrix = movie.find(side_path)
         for clip, instance in CLIPS:
-            name = instance % side
-            entry = next((e for e in movie.display(side_sprite, 0).values() if e['name'] == name), None)
-            if entry is None:
+            name = instance % side if '%s' in instance else instance
+            shown = movie.display(side_sprite, 0)
+            entries = [shown[d] for d in sorted(shown) if shown[d]['name'] == name]   # (a clip placed again over itself)
+            if not entries:
                 continue
+            entry = entries[0]
             sprite = movie.characters[entry['char']]
             matrix = swf.concat(side_matrix, entry['matrix'])
             if clip.startswith('slot'):
@@ -135,6 +140,7 @@ def hud_files(paks, defn, log=print):
                     q = quad(pic, m, None)
                     if q:
                         used[pic.name] = pic
+                        clips_of.setdefault(pic.name, set()).add(clip)
                         out.append(('bar', side, k, pic.name) + q)
                 out.append(('mask', side, k) + rect + (1 if side == 'L' else -1,))
             out.append(('clip', side, clip, len(sprite.frames)))
@@ -143,7 +149,11 @@ def hud_files(paks, defn, log=print):
                 out.append(('label', side, clip, label, first, (min(later) if later else len(sprite.frames)) - 1))
             for f in range(len(sprite.frames)):
                 out.append(('frame', side, clip, f))
-                for pic, m, cx, blend, cl in movie.flatten(sprite, f, matrix, skip=(BAR,)):
+                placed = []
+                for e in entries:
+                    placed += movie.flatten(movie.characters[e['char']], f, swf.concat(side_matrix, e['matrix']),
+                                            e['cx'], e['blend'], skip=(BAR,))
+                for pic, m, cx, blend, cl in placed:
                     q = quad(pic, m, cl)
                     if q is None:
                         rotated += abs(m[1]) > 1e-3 or abs(m[2]) > 1e-3
@@ -152,6 +162,7 @@ def hud_files(paks, defn, log=print):
                     if ma <= 0:
                         continue
                     used[pic.name] = pic
+                    clips_of.setdefault(pic.name, set()).add(clip)
                     out.append(('q', pic.name) + q + (_hex((mr, mg, mb, ma)), _hex((ar, ag, ab, 0))[:6],
                                                       'FF' if blend == swf.BLEND_ADD else '00'))
     # the atlas: the pictures shown, on shelves
@@ -192,9 +203,8 @@ def hud_files(paks, defn, log=print):
             _, name, x0, y0, x1, y1, u0, v0, u1, v1, mult, add, blend = o
             lines.append('q %.2f %.2f %.2f %.2f %s %s %s%s' % (x0, y0, x1, y1, uv(name, u0, v0, u1, v1), mult, add,
                                                                blend))
-    # ARGB8 (the runtime decodes it: title/image.h)
-    argb = np.concatenate([atlas[..., 3:4], atlas[..., :3]], axis=2).tobytes()
-    tex = dict(fmt=14, w=ATLAS_WIDTH, h=height, mips=[argb], gidx=0)
+    # BC3, one level (the runtime decodes it: title/image.h)
+    tex = nut.make_texture(atlas, 0, fmt=2, mips=1)
     log('gauge HUD: %d pictures (%dx%d), %d placements%s' % (
         len(placed), ATLAS_WIDTH, height, sum(1 for o in out if o[0] == 'q'),
         ', %d rotated ones left out' % rotated if rotated else ''))

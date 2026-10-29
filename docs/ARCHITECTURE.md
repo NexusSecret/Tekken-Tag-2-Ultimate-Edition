@@ -1312,7 +1312,7 @@ carries the colour grid and both palettes). The pack holds Namco's assets:
 the importer refuses to write it inside this repository, and `.gitignore`
 keeps the games' file types out.
 
-Tekken 7's 2D fighters' gauges (Akuma's so far; `GAUGE` in a definition,
+Tekken 7's 2D fighters' gauges (Akuma's and Eliza's; `GAUGE` in a definition,
 `convert/gauge.py`, `title/gauge.cpp`): Tekken 7 keeps the gauge in its
 executable, the moveset only tests it (requirement 629: at least `param`,
 635: less) and changes it (0x81c2 adds its value: EX moves -500, supers
@@ -1334,7 +1334,8 @@ the pack's `gauge/` (gauge.ini over gauge.nut), and the runtime shows the
 clips Tekken 7's HUD code would for the gauge (a stock fills, every stock
 full, the gauge spent) on the overlay's HUD layer, the slots' bars moved
 along their masks, while the fighters' round phase (player +2048) is past
-its intro.
+its intro. The pictures shown only in the glow and lightning clips (Eliza's
+bats and flares) are kept at half size, the sheet as BC3.
 
 ## The launcher
 

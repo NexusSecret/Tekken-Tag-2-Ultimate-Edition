@@ -143,7 +143,7 @@ struct Player {
     // the HUD
     int32_t shown = -1;        // the value drawn last (-1: none yet)
     int full = 0;              // its stocks full then
-    Play base, slots[kMaxSlots], text, light, lightning, focus;
+    Play base, slots[kMaxSlots], cover, text, light, lightning, focus;
 };
 std::map<uint32_t, Player> g_players; // by fighter
 
@@ -330,7 +330,7 @@ void draw(std::vector<gpu::overlay::Quad>& out, const Hud& hud, const Config& co
     };
     const char* const slot_names[kMaxSlots] = {"slot0", "slot1", "slot2", "slot3"};
     if (p.shown < 0) { // a new fighter or match: the clips as the gauge is
-        p.base.still(0), p.text.still(0);
+        p.base.still(0), p.cover.still(0), p.text.still(0);
         p.light.hide(), p.focus.hide(), p.lightning.hide(); // (their first frames are their effects)
         for (Play& slot : p.slots) slot.still(0);
         p.full = 0;
@@ -376,6 +376,7 @@ void draw(std::vector<gpu::overlay::Quad>& out, const Hud& hud, const Config& co
         }
         add_clip(out, hud, side, slot_names[k], p.slots[k]);
     }
+    add_clip(out, hud, side, "cover", p.cover);
     add_clip(out, hud, side, "text", p.text);
     add_clip(out, hud, side, "light", p.light);
     add_clip(out, hud, side, "lightning", p.lightning);
