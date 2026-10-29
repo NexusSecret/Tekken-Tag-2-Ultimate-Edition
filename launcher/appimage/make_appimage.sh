@@ -135,7 +135,7 @@ unexpected() {
             ./usr/share/ttt2/characters/*.py) ;;
             ./usr/share/ttt2/characters/t7helper/t7helper.c | ./usr/share/ttt2/characters/t8helper/t8helper.c) ;;
             # (the importer's C parts, compiled on the player's PC for Tekken 8's import: ttt2char/native.py)
-            ./usr/share/ttt2/characters/ttt2char/tekken8/oodle.c) ;;
+            ./usr/share/ttt2/characters/ttt2char/tekken8/oodle.c | ./usr/share/ttt2/characters/ttt2char/tekken8/oodle_windows.h) ;;
             ./usr/share/ttt2/characters/ttt2char/convert/decimate.c) ;;
             "./usr/share/applications/$app_id.desktop") ;;
             "./usr/share/icons/hicolor/scalable/apps/$app_id.svg") ;;
