@@ -313,8 +313,6 @@ class Window:
         s = self.status
         if not self.settings.installed(): return 'Set up the game first: characters are made from it.'
         if not s: return 'The importer cannot tell what this PC has: %s' % (self.status_error or 'still looking')
-        if not s['python']['numpy'] or not s['python']['pillow']:
-            return 'Adding characters needs numpy and Pillow, which Set Up Game gets: set up the game again.'
         if s.get('game', {}).get('error'): return 'The importer cannot read the installed game: ' + s['game']['error']
         return None
 
