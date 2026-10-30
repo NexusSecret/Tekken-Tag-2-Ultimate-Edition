@@ -377,9 +377,9 @@ class ImportTekken8(unittest.TestCase):
         runs, shared = [], []
         args = mock.Mock(tekken7=tekken7, tekken8=tekken8, movesets=os.path.join(folder, '.m'),
                          files=os.path.join(folder, '.f'), game='g', out=folder, no_shared=False,
-                         tekken8_movesets=None)
+                         tekken8_movesets=None, outfits=set())
 
-        def run(name, t7, movesets, game, out, make_shared=True, files=None, tekken8=None):
+        def run(name, t7, movesets, game, out, make_shared=True, files=None, tekken8=None, outfits=True):
             runs.append((name, t7, tekken8, make_shared))
             return pack.write(folder, definition(name), {'.nud': b'nud'}, 0)
 
@@ -458,7 +458,8 @@ class Launcher(unittest.TestCase):
         fighters = {f['name']: f for f in s['fighters']}
         self.assertEqual(fighters['reina'], {'name': 'reina', 'display': 'Reina', 'dlc': None, 'installed': False,
                                              'outdated': False, 'newer': False, 'update': False,
-                                             'moveset_saved': False, 'stand_in': False, 'game': 'tekken8'})
+                                             'moveset_saved': False, 'outfits': 0, 'outfits_added': False,
+                                             'stand_in': False, 'game': 'tekken8'})
         self.assertNotIn('game', fighters['kazumi'])
         self.assertEqual(s['tekken8'], {'found': False, 'path': None,
                                         'error': 'Tekken 8 is not installed in any Steam library',

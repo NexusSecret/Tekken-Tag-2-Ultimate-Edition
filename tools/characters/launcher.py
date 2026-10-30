@@ -17,7 +17,9 @@ Steam app id), whether its pack is there ("installed"), whether that pack is
 an older importer's ("outdated": the game does not load it; adding the fighter again replaces it) or a newer one's
 ("newer": the game does not load it either, and this importer does not replace it; the game needs updating), whether
 the pack the game loads misses what importing the fighter now gives ("update": an older revision, pack.revision;
-adding them again replaces it) and whether its moveset is saved. A Tekken 8 fighter has "game": "tekken8" too (it is
+adding them again replaces it), whether its moveset is saved, how many preset outfits adding it can make
+("outfits", 0 for none: import_character.py --outfits) and whether the pack the game loads has them
+("outfits_added"). A Tekken 8 fighter has "game": "tekken8" too (it is
 read from Tekken 8), its "moveset_saved" is whether its own Tekken 8 moveset is saved whole (any version's, in
 --tekken8-movesets: the import uses it without Tekken 8 running; true for a fighter that converts none), and
 "stand_in" whether the pack the game loads fights with its stand-in's moveset because its own could not be had when
@@ -149,7 +151,9 @@ def status(game=None, movesets=None, movesets8=None):
                    'installed': d.CODE in packs, 'outdated': packs.get(d.CODE) == 'outdated',
                    'newer': packs.get(d.CODE) == 'newer',
                    'update': d.CODE in loaded and loaded[d.CODE]['revision'] < pack.revision(d),
-                   'moveset_saved': tekken8_fighter or d.TEKKEN7_ID in saved}
+                   'moveset_saved': tekken8_fighter or d.TEKKEN7_ID in saved,
+                   'outfits': len(getattr(d, 'PRESETS', ())),
+                   'outfits_added': d.CODE in loaded and loaded[d.CODE]['outfits'] > 0}
         if tekken8_fighter:
             own = getattr(d, 'MOVESET_SOURCE', None) == 'tekken8'       # (importer.converts_tekken8, without numpy)
             fighter['moveset_saved'] = not own or dump8.whole(dump8.saved_files(d.TEKKEN8_CODE, movesets8))

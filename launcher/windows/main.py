@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--cancel-file', type=Path)
     parser.add_argument('--ui-smoke-test', type=Path)
     parser.add_argument('--check', action='store_true')
+    parser.add_argument('--outfits', default='none')     # (an import: whose outfits, as import_character.py)
     parser.add_argument('fighters', nargs='*')
     args = parser.parse_args()
     settings = Settings(args.build_dir, args.config)
@@ -33,7 +34,7 @@ def main():
                 _thread.interrupt_main()
             threading.Thread(target=watch_cancel, daemon=True).start()
         try:
-            worker(settings, args.worker, args.fighters, cancelled)
+            worker(settings, args.worker, args.fighters, cancelled, args.outfits)
         except KeyboardInterrupt:
             print('Cancelled. Completed extraction data is kept.', flush=True)
             return 130

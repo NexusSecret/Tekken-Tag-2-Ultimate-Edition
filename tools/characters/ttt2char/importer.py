@@ -124,15 +124,16 @@ def tekken8_moveset(d, folder):
     return (k, files, references), None
 
 
-def run(name, tekken7, movesets, game, out=None, log=print, make_shared=True, files=FILES, tekken8=None):
+def run(name, tekken7, movesets, game, out=None, log=print, make_shared=True, files=FILES, tekken8=None, outfits=True):
     """Imports fighter `name`; returns the pack's folder. movesets: the folder of the fighter's saved movesets
     (Tekken 7: the .tkmvst files; Tekken 8: tekken8/autodump.py's, None: its MOVESETS). make_shared: also remake what
     the packs share (shared/; an import of several fighters makes it once, after the last). files: the folder of the
     files Tekken 7 keeps encrypted, as the game reads them (tekken7/autodump.py saves them). tekken8: the Tekken 8
     installation (a Tekken 8 fighter's, else for shared/ when a Tekken 8 fighter's pack is installed; None: found
-    through Steam)."""
+    through Steam). outfits: also build the definition's preset outfits (PRESETS: a complete body each, most of an
+    import's time); without them the pack has the default costume only."""
     try:
-        return _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8)
+        return _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, outfits)
     except EncryptedError as error:
         raise InputError('Tekken 7 keeps %s encrypted and it has not been saved from the running game yet: run '
                          'dump_tekken7.py %s (or import_character.py, which runs it) with Steam running'
@@ -266,7 +267,7 @@ def _source(d, tekken7, tekken8, files):
     return tekken7, lambda: sources.Tekken7Source(_paks(paks_dir, files))
 
 
-def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
+def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, outfits):
     d = definition(name)
     folder, open_source = _source(d, tekken7, tekken8, files)
     saved8 = None
@@ -387,7 +388,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8):
     if palettes:
         contents['colours.json'] = json.dumps({str(nn): v for nn, v in sorted(palettes.items())}).encode('utf-8')
     outfit_codes = []
-    if getattr(d, 'PRESETS', ()):
+    if outfits and getattr(d, 'PRESETS', ()):
         step('preset outfits: complete bodies for the in-game costume chooser')
         contents.update(outfits.build(source.paks, archives, rpx, d, slot, xml,
                                    lambda bon, cloth_springs: spring_file(archives, d, bon, cloth_springs),

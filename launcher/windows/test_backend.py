@@ -58,6 +58,10 @@ class LauncherBackend(unittest.TestCase):
         self.assertIn('--progress',cmd)
         self.assertIn('--remove',self.settings.import_command(['geese'],True))
         self.assertTrue(cmd[2].endswith('import_character.py'))
+        self.assertEqual(cmd[cmd.index('--outfits')+1],'none')
+        cmd=self.settings.import_command(['akuma','reina'],outfits='akuma')
+        self.assertEqual(cmd[cmd.index('--outfits')+1],'akuma')
+        self.assertNotIn('--outfits',self.settings.import_command(['geese'],True))
     def test_incomplete_title_and_empty_selection_are_rejected(self):
         with self.assertRaises(ValueError):self.settings.import_command(['reina'])
         with self.assertRaises(ValueError):self.settings.import_command([])

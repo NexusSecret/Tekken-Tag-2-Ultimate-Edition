@@ -265,10 +265,10 @@ def number(value):
 def installed(folder):
     """The packs in the characters folder: [{'path', 'code', 'donor', 'slot' (None if it names none), 'format' (0:
     an older importer's; see above), 'revision' (0 without one), 'stand_in' (the code of the fighter whose moveset
-    it fights with because its own could not be had, '' for none), 'valid' (the port takes it: a three-letter code
-    and a donor), 'current' (valid and of PACK_FORMAT: the port loads it), 'newer' (valid and of a later format)}], by
-    folder name. A folder whose
-    name starts with a dot is none (write()'s pack being made, or the one it replaces; the port skips them too)."""
+    it fights with because its own could not be had, '' for none), 'outfits' (how many preset outfits it has),
+    'valid' (the port takes it: a three-letter code and a donor), 'current' (valid and of PACK_FORMAT: the port loads
+    it), 'newer' (valid and of a later format)}], by folder name. A folder whose name starts with a dot is none
+    (write()'s pack being made, or the one it replaces; the port skips them too)."""
     out = []
     if not os.path.isdir(folder):
         return out
@@ -285,7 +285,8 @@ def installed(folder):
         valid = bool(CODE.fullmatch(v.get('code', ''))) and v.get('donor', '') != ''
         out.append(dict(path=path, code=v.get('code', ''), donor=v.get('donor', ''), slot=number(v.get('slot', '')),
                         format=form, revision=number(v.get('revision', '')) or 0, stand_in=v.get('stand_in', ''),
-                        valid=valid, current=valid and form == PACK_FORMAT, newer=valid and form > PACK_FORMAT))
+                        outfits=len(v.get('outfits', '').split()), valid=valid,
+                        current=valid and form == PACK_FORMAT, newer=valid and form > PACK_FORMAT))
     return out
 
 
