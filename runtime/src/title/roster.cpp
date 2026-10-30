@@ -4243,7 +4243,9 @@ PPC_FUNC(sub_08BF4D44) {
 // end of its life), so that it ends where the projectile does. Tekken 7 turns
 // its missile to the way it flies: the look's ahead is the projectile's way
 // from frame to frame (Akuma's air fireball, down and ahead), level
-// sideways.
+// sideways; before the projectile has moved, the way its row gives (the
+// effect library gives a particle the emitter's frame when it is spawned,
+// and the look's bodies are spawned in its first frame).
 //
 // Tekken 7 places some emitters from the floor's height rather than the bone's
 // (ground smoke, a low wave): the converter puts them in a second file of the
@@ -4413,6 +4415,7 @@ PPC_FUNC(sub_08BE56E4) {
             floor_place(ctx, base, effect, file, place);
             static const uint32_t level = system_alloc(64);
             for (int i = 0; i < 12; ++i) store(level + 4 * i, load(matrix + 4 * i)); // (no model: the bone's axes)
+            bool levelled = false; // the level facing frame replaced the bone's axes
             if (const uint32_t hips = effect_hips(ctx, base, effect)) {
                 float ahead[3] = {0, 0, 0}; // the root's z row: sum over k of L[k][2] W[k]
                 for (int k = 0; k < 3; ++k) {
@@ -4424,6 +4427,7 @@ PPC_FUNC(sub_08BE56E4) {
                     const float x = ahead[0] / n, z = ahead[2] / n;
                     const float rows[12] = {z, 0, -x, 0, 0, 1, 0, 0, x, 0, z, 0}; // left = up x ahead, up, ahead
                     for (int i = 0; i < 12; ++i) storef(level + 4 * i, rows[i]);
+                    levelled = true;
                 }
             }
             // An effect thrown with a projectile: pitched to its path.
@@ -4439,10 +4443,28 @@ PPC_FUNC(sub_08BE56E4) {
                     for (int i = 0; i < 3; ++i) storef(level + 16 + 4 * i, up[i]), storef(level + 32 + 4 * i, ahead[i]);
                 }
             }
-            // A projectile's look: ahead its way, left level, up = ahead x left.
+            // A projectile's look: ahead its way, left level, up = ahead x left. The way is seen once the
+            // projectile has moved (the look's third frame); before that it is the way the projectile's row gives
+            // (its forward and up speeds along the level facing): the look's one-shot bodies (Akuma's egg, rings
+            // and swirls), spawned in its first frame and living as long as the projectile, keep the frame they
+            // were spawned in.
             const auto look = g_projectile_looks.find(effect);
-            if (look != g_projectile_looks.end() && look->second.slot && look->second.way[1] != 0) {
-                const float* a = look->second.way;
+            float a[3] = {0, 0, 0};
+            if (look != g_projectile_looks.end() && look->second.slot) {
+                std::copy(look->second.way, look->second.way + 3, a);
+                if (levelled && a[0] == 0 && a[1] == 0 && a[2] == 0 && look->second.row) {
+                    const auto forward = static_cast<float>(static_cast<int32_t>(load(look->second.row + kRowForward)));
+                    const auto up = static_cast<float>(static_cast<int32_t>(load(look->second.row + kRowUp)));
+                    if (const float n = std::sqrt(forward * forward + up * up); up != 0 && n > 0) {
+                        for (int i = 0; i < 3; ++i)
+                            a[i] = (loadf(level + 32 + 4 * i) * forward + loadf(level + 16 + 4 * i) * up) / n;
+                        if (std::getenv("TTT2_TRACE_PROJECTILES"))
+                            std::fprintf(stderr, "ttt2: projectile look %08X: way from its row %.2f %.2f %.2f\n",
+                                         effect, a[0], a[1], a[2]);
+                    }
+                }
+            }
+            if (a[1] != 0) {
                 float left[3] = {a[2], 0, -a[0]};
                 const float n = std::sqrt(left[0] * left[0] + left[2] * left[2]);
                 if (n > 1e-3f) {

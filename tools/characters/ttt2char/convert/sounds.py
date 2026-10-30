@@ -80,9 +80,10 @@ class Effects:
     """The fighter's sound effects its moves (bank 15) and projectiles (their missiles' hits) play: names in order,
     clips (event name, rate, int16 [channels, samples]) and their values for moves (value())."""
 
-    def __init__(self, paks, code, moveset, xps, kept=lambda name: True):
+    def __init__(self, paks, code, moveset, xps, kept=lambda name: True, extra=()):
         """moveset: its tkmvst; xps(moveset, i) -> a move's (frame, id, value) properties; kept(move name): the
-        importer converts the move (Rage Arts and story moves' sounds are left out)."""
+        importer converts the move (Rage Arts and story moves' sounds are left out); extra: sounds the fighter plays
+        besides its moves' (its gauge's full sound, convert/gauge.py), after the others."""
         self.table = table(paks)
         banks = [WwiseBank(paks.read(VOICE_BANK % code.upper()))]
         try:
@@ -97,7 +98,7 @@ class Effects:
                 if pid in (0x84c4, 0x84c6) and v >> 24 == TABLE_BANK and (v & 0xFFFFFF) < len(self.table):
                     wanted.append(self.table[v & 0xFFFFFF])
         self.hits = missile_hits(paks, code)
-        wanted += list(self.hits.values())
+        wanted += list(self.hits.values()) + list(extra)
         self.names, self.clips = [], []
         for name in wanted:
             if not name or name in self.names or STORY.search(name.lower()):
@@ -117,6 +118,11 @@ class Effects:
         if name not in self.names:
             return None
         return ITEM_SOUND << 24 | OWN_LIST << 12 | (self.base + self.names.index(name))
+
+    def number(self, name):
+        """A sound effect's item sound number (its value's n), or None."""
+        v = self.value(name)
+        return None if v is None else v & 0xFFF
 
     def move_value(self, v):
         """A move's Tekken 7 sound value (bank << 24 | n) -> its TTT2 one, or None."""

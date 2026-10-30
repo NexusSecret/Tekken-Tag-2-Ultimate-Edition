@@ -6,6 +6,8 @@
 // pictures, the fighter lit up yellow as it spends it (Geese light blue in
 // his MAX mode). See gauge.cpp.
 
+#include "cafe/ppc_context.h"
+
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -29,11 +31,13 @@ constexpr uint32_t kStop = 0x8225;   // the opponent stops for value frames (a s
 
 // character.ini's `gauge` line: the most it holds, a stock, then the
 // gains in percent of the damage: a blocked attack's (the defender's, the
-// attacker's), a hit's (the defender's, the attacker's), e.g.
-// `gauge = 1000 500 37 75 112 225` (Akuma's).
+// attacker's), a hit's (the defender's, the attacker's), then the item
+// sound its fighter plays as the gauge fills up (none: left out or -1),
+// e.g. `gauge = 1000 500 37 75 112 225 18` (Akuma's).
 struct Config {
     int32_t max = 0, stock = 500;
     int32_t gain[4] = {50, 100, 150, 300};
+    int32_t full_sound = -1;
 };
 bool parse(const std::string& value, Config& config);
 
@@ -50,8 +54,9 @@ bool property(uint32_t player, int slot, uint32_t id, uint32_t value);
 // empties every gauge; a round's keeps them, as Tekken 7 does.
 void situation(uint32_t kind);
 
-// After the fighters' frame: the gains, the flashes' time, the HUD.
-void fighters_frame(uint8_t* base, const uint32_t fighters[2]);
+// After the fighters' frame: the gains, the full sound, the flashes' time,
+// the HUD (`practice`: a Practice round's, placed for its panels).
+void fighters_frame(PPCContext& ctx, uint8_t* base, const uint32_t fighters[2], bool practice);
 
 // The colour the title draws `fighter` in while it flashes or its MAX mode
 // runs (a guest address of four floats, the fighter's own times yellow or

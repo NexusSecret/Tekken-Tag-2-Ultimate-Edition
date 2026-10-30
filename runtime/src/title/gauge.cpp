@@ -14,6 +14,10 @@
 //   while its move set 0x8228 (+0x6b4: EX moves, Focus Attack, supers).
 // - The gauge empties at a match's start (0x140759a50 for the start kinds
 //   0-3, 11-15, 17, 19-21), not at a round's.
+// - As a gain or 0x81c2 takes the gauge from below its most to its most,
+//   Tekken 7 posts event 0x26 (0x14073d980), whose listener (0x1402d1db0)
+//   plays the common sound SE_battle_spgauge_full for Akuma and Eliza (its
+//   character ids 32 and 36); no move plays it, and a single stock has none.
 // - 0x8229 lights the fighter up (an EX move, a cancel: effect 38 at its
 //   body, the fighter drawn yellow a moment).
 // The converted moveset uses this file's ids for them (gauge.h); the gains
@@ -59,6 +63,10 @@
 #include <optional>
 #include <sstream>
 #include <vector>
+// A player's item sound (r3 its number, r4 1: the player's own list, by its
+// select id; r5 the player), played; title/roster.cpp lends an added fighter
+// its list. TTT2's property 0x82f9 (12 << 24 | 1 << 12 | n) ends here.
+PPC_FUNC(sub_077537D0);
 
 namespace cafe::title::gauge {
 namespace {
@@ -190,12 +198,29 @@ void stop_camera(uint8_t* base) {
             stf(base, camera + kViewProjection + 4 * (4 * r + c), v);
         }
 }
-// Tekken 7 draws it at its screen's bottom, where the title has its own
-// texts (Arcade's stage and time, Promotion Chance): a little higher here
-// (Practice's frame data panels go above it). The left one moves right of
-// Practice's input history while that shows.
-constexpr float kRaise = 70, kBesideHistory = 6;
-float g_shift = 0; // (this frame's, Tekken 7's units)
+// Tekken 7 draws it in its screen's bottom corners, under its long life
+// bars. Here each side's sits under its own life bar: its outer end (the
+// left one's left, the right one's right) where that bar's frame ends,
+// its bottom a little above the title's own texts along the screen's
+// bottom (Survival's WINS: n, the highest of them; Arcade's stage, time
+// and Promotion Chance; the mode's name), as the panel shows at rest.
+// Practice has none of those texts: there its bottom is a little above
+// the line its frame data panels stand on (its hints and DAMAGE INFO 2's
+// bars are below it), so the panels, above it, stay under the title's
+// DAMAGE readout. The left one moves right of Practice's input history,
+// should that reach further. The places are the title's HUD's at its full
+// size, on the TV image (1280 x 720; its life bars are not quite
+// mirrored): its HUD size option draws its HUD smaller about the screen's
+// middle (sub_052EA750 shrinks the viewport), the life bars with it. The
+// texts were seen at the option's default only, and not every title text
+// follows the option (Practice's DAMAGE readout stays put): the gauge
+// never goes lower than where it clears them at the default. The gauge
+// keeps Tekken 7's size.
+constexpr uint32_t kHudScale = 0x107C9908; // the HUD size: (85 + the option's n) / 100, 0.86 by default (n 1)
+constexpr float kDefaultHudSize = 0.86f;
+constexpr float kLifeBarLeft = 83.6f, kLifeBarRight = 1190.6f; // the life bars' frames' outer ends
+constexpr float kTextsTop = 622.6f, kAboveTexts = 8, kBesideHistory = 6;
+float g_shift = 0, g_lift = 0; // (this frame's side's, Tekken 7's units: right, up)
 float g_tops[2] = {};                            // the sides' tops as last shown (0: none)
 std::chrono::steady_clock::time_point g_tops_until; // and until when they show
 constexpr int kMaxSlots = 4;
@@ -223,8 +248,10 @@ struct Bar {
 struct Side {
     std::map<std::string, Clip> clips;
     Bar bars[kMaxSlots];
-    float left = 0; // the panel's (its bars' and resting clips': moved beside Practice's input history)
-    float top = 0;  // what it shows at rest (not its effects), to its visible texels
+    // The panel at rest (its clips' last frames, not the effects; their
+    // visible texels): across its frame (its bars and base clips), up and
+    // down all it shows.
+    float left = 0, right = 0, top = 0, bottom = 0;
 };
 struct Hud {
     Side sides[2];
@@ -266,6 +293,7 @@ struct Player {
     bool max_shown = false;    // the MAX mode drawn then
     std::map<std::string, Play> plays; // the clips', by name
     int32_t max_timer = 0;     // Geese's MAX mode: frames left
+    int32_t heard = -1;        // the value the full sound saw last (-1: none yet)
 };
 std::map<uint32_t, Player> g_players; // by fighter
 
@@ -295,11 +323,13 @@ bool read_picture(std::istringstream& s, Picture& p) {
     return true;
 }
 
-// Where a picture shows on Tekken 7's screen, at the top: its texels at
+// Where a picture shows on Tekken 7's screen: the box of its texels at
 // least half covering (an added picture's by their brightness; soft glows'
-// faint edges left out). 1e9: nowhere.
-float visible_top(const Rgba& image, const Picture& p) {
-    if (p.v0 == p.v1) return 1e9f;
+// faint edges left out), x0 y0 x1 y1 (mirrored pictures too). Nowhere:
+// x0 = y0 = 1e9, x1 = y1 = -1e9.
+std::array<float, 4> visible_box(const Rgba& image, const Picture& p) {
+    constexpr std::array<float, 4> kNowhere = {1e9f, 1e9f, -1e9f, -1e9f};
+    if (p.u0 == p.u1 || p.v0 == p.v1) return kNowhere;
     const auto texel = [](float a, uint32_t size) { return static_cast<uint32_t>(std::clamp(a, 0.0f, float(size))); };
     const uint32_t u0 = texel(std::min(p.u0, p.u1), image.width), u1 = texel(std::max(p.u0, p.u1), image.width);
     const uint32_t v0 = texel(std::min(p.v0, p.v1), image.height), v1 = texel(std::max(p.v0, p.v1), image.height);
@@ -309,17 +339,19 @@ float visible_top(const Rgba& image, const Picture& p) {
         if (added) cover = cover * std::max({t[0], t[1], t[2]}) / 255;
         return cover >= 128;
     };
-    int first = -1, last = -1;
+    int column0 = INT32_MAX, column1 = -1, row0 = -1, row1 = -1;
     for (uint32_t v = v0; v < v1; ++v)
         for (uint32_t u = u0; u < u1; ++u)
             if (shows(image.at(u, v))) {
-                if (first < 0) first = static_cast<int>(v);
-                last = static_cast<int>(v);
-                break;
+                if (row0 < 0) row0 = static_cast<int>(v);
+                row1 = static_cast<int>(v);
+                column0 = std::min(column0, static_cast<int>(u)), column1 = std::max(column1, static_cast<int>(u));
             }
-    if (first < 0) return 1e9f;
+    if (row0 < 0) return kNowhere;
+    const auto x = [&](float u) { return p.x0 + (u - p.u0) / (p.u1 - p.u0) * (p.x1 - p.x0); };
     const auto y = [&](float v) { return p.y0 + (v - p.v0) / (p.v1 - p.v0) * (p.y1 - p.y0); };
-    return std::min(y(float(first)), y(float(last + 1)));
+    const float xa = x(float(column0)), xb = x(float(column1 + 1)), ya = y(float(row0)), yb = y(float(row1 + 1));
+    return {std::min(xa, xb), std::min(ya, yb), std::max(xa, xb), std::max(ya, yb)};
 }
 
 std::optional<Hud> read_hud(const fs::path& directory) {
@@ -372,17 +404,20 @@ std::optional<Hud> read_hud(const fs::path& directory) {
         }
     }
     for (Side& side : hud.sides) { // the panel's extent at rest
-        side.left = 1e9f, side.top = 1e9f;
-        const auto take = [&](const Picture& p) { side.left = std::min({side.left, p.x0, p.x1}); };
+        float box[4] = {1e9f, 1e9f, -1e9f, -1e9f}, frame[2] = {1e9f, -1e9f};
+        const auto take = [&](const Picture& p, bool in_frame) {
+            const auto b = visible_box(hud.image, p);
+            for (int k = 0; k < 2; ++k) box[k] = std::min(box[k], b[k]), box[k + 2] = std::max(box[k + 2], b[k + 2]);
+            if (in_frame) frame[0] = std::min(frame[0], b[0]), frame[1] = std::max(frame[1], b[2]);
+        };
         for (const Bar& bar : side.bars)
-            if (bar.present) take(bar.picture), side.top = std::min(side.top, visible_top(hud.image, bar.picture));
-        for (const char* name : {"base", "base1", "static", "num0"})
-            if (const auto it = side.clips.find(name); it != side.clips.end() && !it->second.frames.empty())
-                for (const Picture& p : it->second.frames.back()) take(p); // (Geese's: its last, "Stay")
-        for (const auto& [name, clip] : side.clips) // (not the effects, which pass over what is above)
+            if (bar.present) take(bar.picture, true);
+        for (const auto& [name, clip] : side.clips) // (Geese's last frames: "Stay")
             if (!clip.frames.empty() && name != "light" && name != "lightning" && name != "focus")
-                for (const Picture& p : clip.frames.back()) side.top = std::min(side.top, visible_top(hud.image, p));
-        if (side.top > 1e8f) side.top = 0;
+                for (const Picture& p : clip.frames.back())
+                    take(p, name == "base" || name == "base1" || name == "static" || name == "num0");
+        if (frame[1] > frame[0]) side.left = frame[0], side.right = frame[1];
+        if (box[3] > box[1]) side.top = box[1], side.bottom = box[3];
     }
     return hud;
 }
@@ -464,8 +499,8 @@ void add_quad(std::vector<gpu::overlay::Quad>& out, const Hud& hud, Picture p, c
     if (p.x1 < p.x0) std::swap(p.x0, p.x1), std::swap(p.u0, p.u1);
     if (p.y1 < p.y0) std::swap(p.y0, p.y1), std::swap(p.v0, p.v1);
     gpu::overlay::Quad q;
-    q.x0 = (p.x0 + g_shift) * kScale, q.y0 = (p.y0 - kRaise) * kScale;
-    q.x1 = (p.x1 + g_shift) * kScale, q.y1 = (p.y1 - kRaise) * kScale;
+    q.x0 = (p.x0 + g_shift) * kScale, q.y0 = (p.y0 - g_lift) * kScale;
+    q.x1 = (p.x1 + g_shift) * kScale, q.y1 = (p.y1 - g_lift) * kScale;
     q.u0 = p.u0 / g_atlas_width, q.u1 = p.u1 / g_atlas_width;
     q.v0 = (hud.atlas_y + p.v0) / g_atlas_height, q.v1 = (hud.atlas_y + p.v1) / g_atlas_height;
     q.top = q.bottom = p.mult;
@@ -623,6 +658,7 @@ bool parse(const std::string& value, Config& config) {
     if (!(s >> c.max >> c.stock)) return false;
     for (int32_t& g : c.gain)
         if (!(s >> g)) break;
+    if (!(s >> c.full_sound)) c.full_sound = -1; // (a failed read stores 0)
     if (c.max <= 0 || c.stock <= 0) return false;
     config = c;
     return true;
@@ -691,22 +727,29 @@ bool property(uint32_t address, int slot, uint32_t id, uint32_t value) {
 }
 
 void situation(uint32_t kind) {
-    // Tekken 7's start kinds (0x140759a50's table): a round's keep the gauge
-    static constexpr uint32_t kKeep[] = {4, 5, 6, 7, 8, 9, 10, 16, 18};
+    // The kinds that keep the gauge: the title's round end (26: the battle's
+    // state 5, sub_03A49AA0, and sub_03A5BED0, after every KO), its next
+    // round (4, 6) and a match won (7), as Tekken 7 keeps it between rounds
+    // (its 0x140759a50 keeps 4-10, 16 and 18). Every other kind empties it:
+    // 0 / 1 / 3 a match's first round (Arcade's next stage too), 12 / 15
+    // Practice, 23 the fighters' load before a match, 24 the start.
+    static constexpr uint32_t kKeep[] = {4, 5, 6, 7, 8, 9, 10, 16, 18, 26};
     if (std::getenv("TTT2_TRACE_GAUGE")) std::fprintf(stderr, "ttt2: gauge: situation %u\n", kind);
-    for (auto& [address, p] : g_players) p.max_timer = 0; // (a round's start ends a MAX mode)
-    g_stop = {};
-    if (std::find(std::begin(kKeep), std::end(kKeep), kind) != std::end(kKeep)) return;
+    const bool keep = std::find(std::begin(kKeep), std::end(kKeep), kind) != std::end(kKeep);
     for (auto& [address, p] : g_players) {
-        p.value = start_value();
-        p.shown = -1;
+        p.max_timer = 0; // (a round's start ends a MAX mode)
         p.no_gain_move = 0;
         p.flash = 0;
-        p.health_known = false;
+        p.health_known = false; // (the fighters' health is set anew)
+        if (keep) continue;
+        p.value = start_value();
+        p.shown = -1;
+        p.heard = -1;
     }
+    g_stop = {};
 }
 
-void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
+void fighters_frame(PPCContext& ctx, uint8_t* base, const uint32_t fighters[2], bool practice) {
     if (g_fighters.empty()) return;
     g_active[0] = fighters[0], g_active[1] = fighters[1];
     if (g_stop.frames > 0) { // (over early when a fighter is hit, or another is in play)
@@ -766,6 +809,22 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
         Player& p = player(fighters[s], slots[s]);
         p.value = clamp(p.value + gains[s], who[s]->config.max);
     }
+    // The full sound: as a gauge reaches its most from below (this frame's
+    // costs, adds and gains done), as Tekken 7's gauge-full event plays it.
+    for (int s = 0; s < 2; ++s) {
+        if (!who[s]) continue;
+        Player& p = player(fighters[s], slots[s]);
+        const int32_t n = who[s]->config.full_sound, most = who[s]->config.max;
+        if (n >= 0 && p.heard >= 0 && p.heard < most && p.value >= most) {
+            const PPCContext saved = ctx;
+            ctx.r[3] = static_cast<uint32_t>(n), ctx.r[4] = 1, ctx.r[5] = fighters[s];
+            sub_077537D0(ctx, base);
+            ctx = saved;
+            if (std::getenv("TTT2_TRACE_GAUGE"))
+                std::fprintf(stderr, "ttt2: gauge: %08X full: item sound %d\n", fighters[s], n);
+        }
+        p.heard = p.value;
+    }
     // The MAX modes run down.
     for (auto& [address, p] : g_players)
         if (p.max_timer > 0) --p.max_timer;
@@ -794,17 +853,29 @@ void fighters_frame(uint8_t* base, const uint32_t fighters[2]) {
     const auto now = std::chrono::steady_clock::now();
     g_tops[0] = g_tops[1] = 0;
     g_tops_until = now + std::chrono::milliseconds(250);
+    // The title's HUD size (as its viewport takes it: smaller only).
+    const float hud_size = ldf(base, kHudScale), scale = hud_size > 0.5f && hud_size < 1.0f ? hud_size : 1.0f;
+    const auto hud_x = [&](float x) { return gpu::overlay::kWidth / 2 + (x - gpu::overlay::kWidth / 2) * scale; };
+    const auto hud_y = [](float y, float size) { return gpu::overlay::kHeight / 2 + (y - gpu::overlay::kHeight / 2) * size; };
+    const float texts_top = practice ? framedata::kPanelsBottom
+                                     : std::min(hud_y(kTextsTop, scale), hud_y(kTextsTop, kDefaultHudSize));
     for (int s = 0; s < 2; ++s) {
         if (!who[s] || !who[s]->hud) continue;
         const Side& side = who[s]->hud->sides[s];
-        g_shift = 0;
-        if (const float right = framedata::history_right(); right && s == 0 && side.left < 1e9f)
-            g_shift = std::max(0.0f, (right + kBesideHistory) / kScale - side.left);
+        const bool framed = side.right > side.left;
+        // Under its life bar, above the title's texts.
+        const float under_bar = !framed ? 0
+                              : s == 0 ? hud_x(kLifeBarLeft) / kScale - side.left : hud_x(kLifeBarRight) / kScale - side.right;
+        g_lift = side.bottom > side.top ? side.bottom - (texts_top - kAboveTexts) / kScale : 0;
+        float beside = 0; // right of Practice's input history, should that reach further
+        if (const float right = framedata::history_right(); right && s == 0 && framed)
+            beside = (right + kBesideHistory) / kScale - side.left;
         // (a frame Practice's history is not reported, as Geese's MAX activation stops the game, keeps the place)
         static struct { float shift = 0; std::chrono::steady_clock::time_point at; } kept[2];
-        if (g_shift != 0) kept[s] = {g_shift, now};
-        else if (now - kept[s].at < std::chrono::milliseconds(500)) g_shift = kept[s].shift;
-        if (side.top) g_tops[s] = (side.top - kRaise) * kScale;
+        if (beside != 0) kept[s] = {beside, now};
+        else if (now - kept[s].at < std::chrono::milliseconds(500)) beside = kept[s].shift;
+        g_shift = s == 0 ? std::max(under_bar, beside) : under_bar;
+        if (side.bottom > side.top) g_tops[s] = (side.top - g_lift) * kScale;
         draw(quads, *who[s]->hud, who[s]->config, player(fighters[s], slots[s]), s);
     }
     gpu::overlay::show_hud(std::move(quads), 0.1);

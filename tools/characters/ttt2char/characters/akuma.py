@@ -10,7 +10,7 @@ TEKKEN7_ID = 32
 TEKKEN7_CODE = 'mrx'
 CODE = 'mrx'
 SEX = 'male'
-REVISION = 1                  # his gauge (packs made before have his EX moves free)
+REVISION = 2                  # his gauge (1: packs made before have his EX moves free); its full sound (2)
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
@@ -82,8 +82,10 @@ _SPECIAL_TARGETS = (
     'Mx_hyakiD', 'Mx_asyurab', 'Mx_saving_cn',
 )
 
-# The Super Combo gauge (convert/gauge.py): two stocks of 500; his gains as Tekken 7 has them since its 2019 patch
-GAUGE = dict(max=1000, stock=500, gain=(37, 75, 112, 225), hud='/Game/UI_Common/Flash/sw_ui_hud_rage/sw_ui_hud_rage')
+# The Super Combo gauge (convert/gauge.py): two stocks of 500; his gains as Tekken 7 has them since its 2019 patch; the
+# sound Tekken 7 plays as it fills up
+GAUGE = dict(max=1000, stock=500, gain=(37, 75, 112, 225), hud='/Game/UI_Common/Flash/sw_ui_hud_rage/sw_ui_hud_rage',
+             full_sound='SE_battle_spgauge_full')
 
 MOVESET = {
     # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds, and d/f+1+2 (Mx_3lrp)

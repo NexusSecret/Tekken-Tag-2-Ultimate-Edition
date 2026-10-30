@@ -59,6 +59,26 @@ class SoundEffects(unittest.TestCase):
         self.assertEqual(e.hit_value(5), 12 << 24 | 1 << 12 | 8)
         self.assertIsNone(e.hit_value(4))
 
+    def test_an_effects_item_sound_number(self):
+        e = self.effects()
+        self.assertEqual(e.number('mrx_hadou01_hit'), 8)
+        self.assertIsNone(e.number('SE_battle_spgauge_full'))
+
+
+class FullSound(unittest.TestCase):
+    """Tekken 7 plays SE_battle_spgauge_full as Akuma's and Eliza's gauges fill up; the gauge line's last field."""
+    def test_the_gauge_line_ends_in_its_full_sound_when_it_has_one(self):
+        from ttt2char.characters import definition
+        akuma = definition('akuma')
+        self.assertEqual(G.ini_line(akuma), 'gauge = 1000 500 37 75 112 225')
+        self.assertEqual(G.ini_line(akuma, 18), 'gauge = 1000 500 37 75 112 225 18')
+
+    def test_akuma_and_eliza_name_it_and_geese_does_not(self):
+        from ttt2char.characters import definition
+        self.assertEqual(G.full_sound(definition('akuma')), 'SE_battle_spgauge_full')
+        self.assertEqual(G.full_sound(definition('eliza')), 'SE_battle_spgauge_full')
+        self.assertIsNone(G.full_sound(definition('geese')))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -11,7 +11,11 @@ the attacker's) in percent of the damage, hud=the HUD movie's object path). Fact
 * the gains (0x140713f72): Akuma 37 / 75 / 112 / 225, Geese 21 / 85 / 63 / 255, everyone else 50 / 100 / 150 / 300;
 * Geese's MAX mode: 176 tests its timer (+0xcd8) running, 0x82a9 adds frames to it (at most 720); no gains meanwhile;
 * a super's start slows everything but its fighter down to a stop: 0x828c (slow motion: its value's low 16 bits the
-  frames) with 0x828d 1 (the attacker immune), Double Reppuken 70 frames from its 8th, its hit at the 80th.
+  frames) with 0x828d 1 (the attacker immune), Double Reppuken 70 frames from its 8th, its hit at the 80th;
+* as a gain or 0x81c2 takes the gauge from below its most to its most, the game posts event 0x26 (0x14073d980), whose
+  listener (0x1402d1db0) plays the common sound SE_battle_spgauge_full for Akuma and Eliza only (character ids 32 and
+  36); no move plays it, and a single stock has none. A definition names it as GAUGE full_sound (the runtime plays it
+  as an item sound: the gauge line's last field).
 """
 # the runtime's requirements: ids no TTT2 moveset uses that TTT2's requirement function takes as false, below 643 (TTT2
 # marks cancel rows testing 643 and above as special ones, never tested for a player: sub_040D2300)
@@ -61,12 +65,19 @@ def of(defn):
     return vars(defn).get('GAUGE')
 
 
-def ini_line(defn):
-    """character.ini's `gauge` line (title/gauge.h), or None."""
+def full_sound(defn):
+    """The sound the definition's gauge plays as it fills up (its Tekken 7 event name), or None."""
+    return (of(defn) or {}).get('full_sound')
+
+
+def ini_line(defn, full_sound=None):
+    """character.ini's `gauge` line (title/gauge.h), or None; full_sound: its item sound number (the runtime plays it
+    as the gauge fills up)."""
     g = of(defn)
     if not g:
         return None
-    return 'gauge = %d %d %d %d %d %d' % ((g['max'], g['stock']) + tuple(g.get('gain', (50, 100, 150, 300))))
+    line = 'gauge = %d %d %d %d %d %d' % ((g['max'], g['stock']) + tuple(g.get('gain', (50, 100, 150, 300))))
+    return line + (' %d' % full_sound if full_sound is not None else '')
 
 
 # ------------------------------------------------------------------------------------------------ the HUD

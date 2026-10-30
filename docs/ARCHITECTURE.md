@@ -1327,7 +1327,15 @@ passes over them). The runtime does what Tekken 7's executable does around
 them: after each fighters' frame a fighter that lost health gains that
 times 112% / 150% (Akuma's / anyone else's), its opponent 225% / 300%, of a
 blocked attack's damage 37% / 50% and 75% / 100%; the gauge empties at a
-match's start and carries over between rounds. The flash multiplies the
+match's start and carries over between rounds (the title's situation
+set-up `sub_039C2DB0` keeps it for its round end, 26, its next round, 4
+and 6, and a match won, 7; a match's first round, 1 and 3, Practice's 12
+and 15 and the fighters' load, 23, empty it). As it reaches its most from
+below, Akuma's and Eliza's play Tekken 7's `SE_battle_spgauge_full` (its
+gauge-full event's listener plays that common sound for them; no move
+does): the importer appends it as one more item sound and writes its
+number as the gauge line's seventh field, and the runtime plays it through
+the title's item sound player `sub_077537D0`. The flash multiplies the
 fighter's colour (sub_04E1A0FC) by yellow for a moment. The HUD is Tekken
 7's, from its HUD movie (a Scaleform SWF, `tekken7/swf.py`): the importer
 plays each clip's timeline and writes every frame's placed pictures into
@@ -1335,8 +1343,11 @@ the pack's `gauge/` (gauge.ini over gauge.nut), and the runtime shows the
 clips Tekken 7's HUD code would for the gauge (a stock fills, every stock
 full, the gauge spent) on the overlay's HUD layer, the slots' bars moved
 along their masks, while the fighters' round phase (player +2048) is past
-its intro; Practice's frame data panels go above it (its top: where its
-resting pictures' texels cover at least half). The pictures shown only in the glow and lightning clips (Eliza's
+its intro. Each side's panel ends where its own life bar's frame ends
+(the title's HUD size option, 0x107C9908, moves both) and rests a little
+above the title's texts at the screen's bottom (Survival's `WINS: n`), in
+Practice above the frame data panels' line; those panels go above it (its
+box: where its resting pictures' texels cover at least half). The pictures shown only in the glow and lightning clips (Eliza's
 bats and flares) are kept at half size, the sheet as BC3.
 Geese's gauge holds three stocks and has Tekken 7's MAX mode: 1+2+3 spends
 a stock and starts a timer (player +0xcd8: at most 720 frames, one less a
@@ -1386,7 +1397,11 @@ sounds: 0x82f9 = 12 << 24 | 1 << 12 | n (kind 1: the player's own list,
 which the runtime makes the donor's item sounds and then these), as does a
 projectile row's hit sound (field 16). They play alongside the voice.
 A projectile's look turns to the way the projectile flies (its place from
-frame to frame; Tekken 7 turns its missile so). An effect that starts with
+frame to frame; Tekken 7 turns its missile so), and before the projectile
+has moved, to the way its row gives (its forward and up speeds): the
+effect library gives a particle the emitter's frame when it spawns, and
+the look's bodies (Akuma's egg, rings and swirls) spawn on its first frame,
+so the air fireball's flew level along its path. An effect that starts with
 a projectile thrown up or down (within 150 ms of it: the air fireball's
 flash, which Tekken 7 sets on the throwing hand) turns whole about its
 fighter's left to the projectile's path (atan2 of the row's up and forward

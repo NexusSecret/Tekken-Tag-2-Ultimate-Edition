@@ -22,5 +22,8 @@ void set_setting(Setting s, uint32_t value);
 // The right edge of the input history's column (on the left) while it
 // shows, else 0.
 float history_right();
+// The line the panels stand on (on the TV image), above the title's hints
+// and DAMAGE INFO 2's bars (title/gauge.cpp's gauges keep above it too).
+constexpr float kPanelsBottom = 634;
 
 } // namespace cafe::title::framedata

@@ -322,7 +322,8 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
     effects = None
     if own_moveset is not None and game_of(d) == 'tekken7' and gauge.of(d):
         effects = sounds.Effects(source.paks, d.TEKKEN7_CODE, own_moveset, idmaps.xps,
-                                 lambda name: not sounds.LEFT_OUT.search(name))
+                                 lambda name: not sounds.LEFT_OUT.search(name),
+                                 extra=[s for s in (gauge.full_sound(d),) if s])
         effects.base = sounds.item_count(rpx, d.DONOR)
     try:
         clips = source.clips(d)
@@ -395,7 +396,9 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, m
                                    (nud, nut, bon, mop), standing=standing,
                                    log=lambda s: log('         ' + s.strip()), reference_bon=bon))
         outfit_codes = outfits.codes(d)
+    gauge_sound = effects.number(gauge.full_sound(d)) if effects and gauge.full_sound(d) else None
     target = pack.write(out, d, contents, slot, chr_tones=chr_tones, voice_extra=voice_extra, sound_extra=sound_extra,
+                        gauge_sound=gauge_sound,
                         weapons=weapons.of_skeleton(bone.read(bon), getattr(d, 'WEAPONS', ())), outfits=outfit_codes)
     step('wrote %s' % target)
 
