@@ -267,7 +267,7 @@ def _source(d, tekken7, tekken8, files):
     return tekken7, lambda: sources.Tekken7Source(_paks(paks_dir, files))
 
 
-def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, outfits):
+def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, make_outfits):
     d = definition(name)
     folder, open_source = _source(d, tekken7, tekken8, files)
     saved8 = None
@@ -388,7 +388,7 @@ def _run(name, tekken7, movesets, game, out, log, make_shared, files, tekken8, o
     if palettes:
         contents['colours.json'] = json.dumps({str(nn): v for nn, v in sorted(palettes.items())}).encode('utf-8')
     outfit_codes = []
-    if outfits and getattr(d, 'PRESETS', ()):
+    if make_outfits and getattr(d, 'PRESETS', ()):          # (outfits: the module that makes them)
         step('preset outfits: complete bodies for the in-game costume chooser')
         contents.update(outfits.build(source.paks, archives, rpx, d, slot, xml,
                                    lambda bon, cloth_springs: spring_file(archives, d, bon, cloth_springs),

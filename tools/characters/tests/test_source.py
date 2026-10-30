@@ -207,7 +207,10 @@ class RunStandIn(unittest.TestCase):
     retargeted) and motions (data005 row 13) in the pack, no command list, its item database, a warning; shared/ gets
     her source and Tekken 7's folders."""
 
-    def test_run(self):
+    @contextlib.contextmanager
+    def reina(self, **run):
+        """importer.run('reina', ..., **run) on the stand-ins below -> (target, lines, opened, build, made, src, motion),
+        while its output folder lasts."""
         motion = b'MOTION PACK'
         archives = mock.Mock()
         archives.has.return_value = True
@@ -247,7 +250,11 @@ class RunStandIn(unittest.TestCase):
             build = stack.enter_context(mock.patch.object(importer.voice, 'build',
                                                           return_value=(dict(banks), [], {}, (), ())))
             lines = []
-            target = importer.run('reina', None, None, 'g', out, log=lines.append, files='/saved', tekken8='t8')
+            target = importer.run('reina', None, None, 'g', out, log=lines.append, files='/saved', tekken8='t8', **run)
+            yield target, lines, opened, build, made, src, motion
+
+    def test_run(self):
+        with self.reina() as (target, lines, opened, build, made, src, motion):
             files = set(os.listdir(target))
             with open(os.path.join(target, 'rei.moveset'), 'rb') as f:
                 moves = f.read()
@@ -271,6 +278,24 @@ class RunStandIn(unittest.TestCase):
         sources, = made                                # (her source as it is; Tekken 7's saved files for its fighters)
         self.assertIs(sources(definition('reina')), src)
         self.assertEqual(sources.files, '/saved')
+
+    def test_outfits_only_when_asked(self):
+        """run(outfits=): a definition's preset outfits made into the pack, or left out. (The parameter once had the
+        name of the module that makes them, which it hid: every import with outfits failed.)"""
+        own = definition('reina')
+        with_presets = types.ModuleType(own.__name__)
+        with_presets.__dict__.update(vars(own))
+        with_presets.PRESETS = (('DefaultCos1P', 'Default'), ('cos2', 'Second'))
+        for asked in (True, False):
+            with mock.patch.object(importer, 'definition', return_value=with_presets), \
+                    mock.patch.object(importer.outfits, 'build', return_value={'raa.nud': b'outfit'}) as made, \
+                    mock.patch.object(importer.outfits, 'codes', return_value=['raa', 'rab']), \
+                    self.reina(outfits=asked) as (target, *_):
+                ini = pack.read_ini(os.path.join(target, 'character.ini'))
+                files = set(os.listdir(target))
+            self.assertEqual(made.called, asked)
+            self.assertEqual(ini.get('outfits'), 'raa rab' if asked else None)
+            self.assertEqual('raa.nud' in files, asked)
 
 
 class RunOwnVoice(unittest.TestCase):
