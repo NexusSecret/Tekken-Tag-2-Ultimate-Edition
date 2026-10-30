@@ -1,4 +1,4 @@
-"""The added fighters' pictures and names on TTT2's 2D screens, made from their Tekken 7 UI pictures.
+"""The added fighters' pictures and names on TTT2's 2D screens, made from their Tekken 7 or Tekken 8 UI pictures.
 
 TTT2 shows a fighter's pictures in three ways, all by its UI position (its row in tables of 59):
 * labels of sprites in the 2D layouts (LMB, data007): a per-fighter sprite has one label per fighter
@@ -14,7 +14,7 @@ TTT2 shows a fighter's pictures in three ways, all by its UI position (its row i
 
 Each picture is made the same way: the pictures every fighter has at that place give the frame (pixels all of
 them share), the background (their darkest, most transparent pixels) and the area a picture covers; the fighter's
-Tekken 7 picture is scaled and placed so that its face sits where faces sit in that kind of picture, cut to that
+own picture is scaled and placed so that its face sits where faces sit in that kind of picture, cut to that
 area, laid over the background, under the frame. In the big portraits it also fades into the dark background
 towards the frame, as every fighter there does (edge_fade).
 
@@ -23,6 +23,15 @@ together, in the order of their places (shared_files, for shared/): layouts and 
 (`keys/<key>.bin`); the new texture pages go into `keys/<container key>.add`, which the port appends to the title's
 container. What is a fighter's own (the loading and VS screens' portraits, the costume chooser's picture) goes into
 its pack (pack_files).
+
+The fighter's own pictures come from its game through a picture source: anything with picture(path) -> (H, W, 4)
+uint8 and `game` ('tekken7', 'tekken8'; source.py's sources), or Tekken 7's paks as such (Tekken7Pictures). Its
+definition's ART names them: a bust (head and shoulders), its whole body, its name and its costume, with where the
+face is in the first two. Some kinds have a glow around the fighter that TTT2's pictures do not have, taken off
+(GLOWS): Tekken 7's whole-body pictures a pale one, Tekken 8's busts a pink rim light. Tekken 8's busts also show
+more of the fighter below the face than TTT2's pictures do: the pictures cut from them show the face bigger
+(BUST_FRAME). Tekken 7's costume picture is a render on a grey panel, Tekken 8's one on a transparent background
+(cut_out takes either).
 
 Nothing of either game is in this file: it reads the player's files.
 """
@@ -41,10 +50,28 @@ from ..ttt2.archive import key_of
 PAUL = 'pau'                      # UI position 0: the runtime shows the added fighter in Paul's place
 LAYOUTS = 'data007'               # the 2D layouts (LMB), each followed by its texture container (NTP3)
 # The select grids' new cells (roster.cpp kCells, pack.place): at a fighter's panel (`anchor`) moved some columns
-# over (the columns' pitch: between the panels of PITCH_FROM), in the top row (the height of GRID_BESIDE's panel) or
-# the anchor's own row.
+# over (the columns' pitch: between the panels of PITCH_FROM), in the top row (with its card frame where
+# GRID_BESIDE's panel has its: the top row's panels draw their card at their place, the other rows' 6 higher), a row
+# above it (the rows' pitch: between the panels of ROW_PITCH_FROM, the cursor's 65, sub_06F4D7B8) or the anchor's own
+# row; drawn in the rows' order (each row over the one above it, as the title's are).
 GRID_BESIDE = 'vio'
 PITCH_FROM = ('rog', 'rav')       # grid row 1, columns 0 and 1
+ROW_PITCH_FROM = ('rog', 'mok')   # column 0, grid rows 1 and 2
+# The select grid with a new top row (when a fighter's place is past pack.CELLS): grid row -1 for added fighters where
+# the title's top row is, under the team bars (its empty cells show the background); the title's three rows move down
+# a row into the space under the grid (ROWS_DOWN; roster.cpp kRowsCursorRow: the cursor's row 1 follows them), and
+# what is under the grid with them; the '?' panel is stretched down over the four rows; the banner under the grid is
+# left out (the button guide moves down where it was: roster.cpp kRowsGuideDown). The grid's top line, the portraits,
+# team bars and dialogs stay. Layout units: 720p pixels, y down.
+# Only the select's frames change (the stage select uses the same sprite from STAGE_LABEL on).
+ROWS_DOWN = 65
+STAGE_LABEL, OUT_LABEL = 'stage_in', 'face_all_out'     # (the select rests at OUT_LABEL; the faces go out after it,
+                                                        # the stage cards come in)
+GRID_LINE = re.compile(r'^face_waku_up_line')
+RANDOM_PANEL = re.compile(r'^(sentaku_)?random_face_panel')
+LEFT_OUT = ('choose_your_character_moji',)
+UNDER_LINE = ('face_waku_under_line',)
+SPACERS = ('spacer_left', 'spacer_right')
 # Labels whose pictures the game puts in itself (the big portraits' frames): copied, not drawn; they end on
 # the fighter's name, which is drawn.
 GAME_DRAWN = re.compile(r'^p[12]_chara_waku_$')
@@ -62,8 +89,9 @@ HUD = 0x7C476BDE
 HUD_PAUL = (30, 105, 164)
 # The select screen's costume chooser: per select id a texture container of costume pictures (124 x 304, one per
 # costume; their keys in a table of the title by select id). The fighter has one costume; its picture is made from
-# its Tekken 7 costume-slot picture (a full-body render on a grey panel between white margins): the fighter cut out
-# and stood in the room the title's pictures share, with its reflection on the floor. roster.cpp kCostumeFile.
+# its game's costume picture (Tekken 7's costume slot: a full-body render on a grey panel between white margins;
+# Tekken 8's: on a transparent background): the fighter cut out and stood in the room the title's pictures share,
+# with its reflection on the floor. roster.cpp kCostumeFile.
 COSTUME_PREVIEWS = 0x10161590
 COSTUME_FILE = 'art/costumes.nut'
 SELECT_IDS = 59
@@ -72,7 +100,7 @@ PAGE_WIDTH = 1024                 # new texture pages: at most this wide, as tal
 UI_ROWS = 59                      # UI positions (rows of the title's tables)
 
 # Where a face sits in each kind of picture: (eyes' centre x, y as fractions of the picture, eyes-to-chin as a
-# fraction of its height, which Tekken 7 picture: 'bust' or 'body'). Measured on the TTT2 pictures.
+# fraction of its height, which of the fighter's pictures: 'bust' or 'body'). Measured on the TTT2 pictures.
 FACE_TALL = (0.52, 0.40, 0.21, 'bust')          # 56x88, 100x136: head and shoulders
 FACE_SQUARE = (0.40, 0.38, 0.20, 'bust')        # 140x140
 FACE_STRIP = (0.46, 0.42, 0.36, 'bust')         # 160x56: eyes and mouth, faded at the sides
@@ -126,18 +154,52 @@ def _resize(a, w, h):
     return _straight(np.clip(np.stack(chans, -1), 0.0, 1.0))
 
 
-class Sources:
-    """The fighter's Tekken 7 pictures (d.ART), as RGBA floats, with where its face is in each."""
+class Tekken7Pictures:
+    """Tekken 7's UI pictures by object path, from its paks (tekken7.pak.Paks): the picture source of the calls
+    that pass the paks themselves."""
 
-    def __init__(self, paks, d):
+    game = 'tekken7'
+
+    def __init__(self, paks):
+        self.paks = paks
+
+    def picture(self, path):
+        return Texture2D(load(self.paks, path)).decode()
+
+
+def picture_source(source):
+    """`source` as a picture source: one (it has picture()), or Tekken 7's paks."""
+    return source if hasattr(source, 'picture') else Tekken7Pictures(source)
+
+
+def source_of(sources, slot, d):
+    """Fighter d's picture source in shared_files' `source`: one source (or paks) for every fighter, a mapping
+    {slot or d.CODE: source (or paks)}, or a function of the definition that gives it (source.Sources)."""
+    if isinstance(sources, dict):
+        return picture_source(sources[slot] if slot in sources else sources[d.CODE])
+    if callable(sources) and not hasattr(sources, 'picture'):
+        return picture_source(sources(d))
+    return picture_source(sources)
+
+
+class Sources:
+    """The fighter's pictures (d.ART: from its game through `source`, see picture_source), as RGBA floats, with
+    where its face is in each."""
+
+    def __init__(self, source, d):
+        source = picture_source(source)
+        glows = GLOWS.get(getattr(source, 'game', None), {})
+        zoom, drop = BUST_FRAME.get(getattr(source, 'game', None), (1.0, 0.0))
         self.pictures, self.faces = {}, {}
         for kind in ('bust', 'body'):
             path, face = d.ART[kind]
-            img = _float(Texture2D(load(paks, path)).decode())
-            if kind == 'body':
-                img = deglow(img)
+            img = _float(source.picture(path))
+            if kind in glows:
+                img = glows[kind](img)
+            if kind == 'bust' and (zoom, drop) != (1.0, 0.0):
+                face = (face[0], face[1] - drop * face[2], face[2] / zoom)
             self.pictures[kind], self.faces[kind] = img, face
-        self.name = _float(Texture2D(load(paks, d.ART['name'])).decode())
+        self.name = _float(source.picture(d.ART['name']))
 
     def framed(self, place, w, h, mirror=False):
         """The fighter's picture scaled and moved so that its face sits at `place` in a w x h picture."""
@@ -160,7 +222,7 @@ class Sources:
 
     def title_name(self, w, h):
         """The fighter's name for a w x h name picture of the title: in the title's own letters (see Letters) as
-        wide as it needs, else its Tekken 7 name picture fitted in w x h."""
+        wide as it needs, else its game's name picture fitted in w x h."""
         letters = getattr(self, 'letters', None)
         text = getattr(self, 'short_name', None)
         pic = letters.picture(text) if letters is not None and text else None
@@ -171,7 +233,7 @@ class Sources:
         return pic
 
     def name_picture(self, w, h, height=0.6):
-        """The fighter's name (its Tekken 7 name picture, cut to its letters) centred in a w x h picture, the
+        """The fighter's name (its game's name picture, cut to its letters) centred in a w x h picture, the
         letters `height` of it tall."""
         a = self.name
         ys, xs = np.nonzero(a[..., 3] > 0.05)
@@ -197,6 +259,49 @@ def deglow(img):
     glow = (alpha < 0.97) & (pale > 0.55)
     out[..., 3] = np.where(glow, np.clip((alpha - 0.6) / 0.4, 0.0, 1.0) * alpha, alpha)
     return out
+
+
+# Tekken 8's busts (Makuai_Character_L) have a rim light around the fighter: a band of one colour (pink-red, about
+# 240, 60, 100 on every fighter measured) fading out over ~100 pixels at alpha 0.15 and less (0.3 to 0.45 at most,
+# where it meets the hair). Most of the faintest pixels are that colour; pixels near it that are half transparent
+# lose their alpha, those a little different (the hair the light falls on) keep it.
+RIM_FAINT = 0.1        # the faint pixels (alpha below this) whose commonest colour is the rim light's
+RIM_SHARE = 0.25       # ... when at least this share of them have it (else the picture has no rim light)
+RIM_BIN = 16           # colours are counted in steps of this (of 255)
+RIM_NEAR, RIM_FAR = 0.06, 0.25           # colour distance (largest channel difference): all rim light .. none
+RIM_SOLID = (0.35, 0.6)                  # alpha from which a pixel is taken less and less for rim light .. never
+
+
+def deglow_rim(img):
+    """A picture without its rim light (see RIM_FAINT): its colour found among the faintest pixels, the
+    half-transparent pixels of that colour made transparent."""
+    alpha = img[..., 3]
+    faint = img[(alpha > 0.0) & (alpha < RIM_FAINT)][:, :3]
+    if len(faint) < 64:
+        return img
+    q = np.minimum((faint * 255.0) // RIM_BIN, 255 // RIM_BIN).astype(np.int64)
+    keys = (q[:, 0] * 256 + q[:, 1]) * 256 + q[:, 2]
+    values, counts = np.unique(keys, return_counts=True)
+    if counts.max() < RIM_SHARE * len(faint):
+        return img
+    key = values[counts.argmax()]
+    colour = faint[keys == key].mean(0)
+    distance = np.abs(img[..., :3] - colour).max(-1)
+    near = np.clip((RIM_FAR - distance) / (RIM_FAR - RIM_NEAR), 0.0, 1.0)
+    lo, hi = RIM_SOLID
+    thin = 1.0 - np.clip((alpha - lo) / (hi - lo), 0.0, 1.0)
+    out = img.copy()
+    out[..., 3] = alpha * (1.0 - near * thin)
+    return out
+
+
+# The glows taken off each game's pictures, by kind
+GLOWS = {'tekken7': {'body': deglow}, 'tekken8': {'bust': deglow_rim}}
+# How the pictures cut from each game's bust (its select screen cells, the faces in fights) frame the face against
+# FACE_*'s measures: (how much bigger, how much lower in eyes-to-chin lengths of the bust). Tekken 8's busts show a
+# front-facing head with much of the jacket below; TTT2's cells fill with the head (Reina's cell next to Violet's,
+# user 2026-10-26)
+BUST_FRAME = {'tekken8': (1.5, 0.1)}
 
 
 def compose(others, picture, fade=None):
@@ -575,7 +680,8 @@ class Layout:
         below = lm.find_named('face_panel_' + self.cell['anchor'])
         beside = lm.find_named('face_panel_' + GRID_BESIDE)
         pitch = [lm.find_named('face_panel_' + c) for c in PITCH_FROM]
-        if not below or not beside or not all(pitch) or lm.find_named('face_panel_' + self.code):
+        rows = [lm.find_named('face_panel_' + c) for c in ROW_PITCH_FROM]
+        if not below or not beside or not all(pitch) or not all(rows) or lm.find_named('face_panel_' + self.code):
             return
         grid, _, place = below[0]
         panel = lm.char(place.char)
@@ -593,30 +699,37 @@ class Layout:
                 mine = self.sources.framed(face_place(*size), size[0], size[1])
                 ok = stack is not None and stack.shape[1:3] == (size[1], size[0])
                 char_map[shape.id] = self.new_shape(shape, compose(stack, mine) if ok else mine)
+        xs = [_place_xy(lm, p[0][2])[0] for p in pitch]
+        top = _place_xy(lm, beside[0][2])[1]
+        ys = [_place_xy(lm, r[0][2])[1] for r in rows]
+        if top is None or None in xs or None in ys:
+            return
         sid = lm.take_id(below=grid.id, above=max(panel.id, max(char_map.values())))
         lm.clone_sprite(panel.id, sid, char_map)
-        # in the grid: everything the panel below does, at a new depth after the panels, in the top row
-        panels = [c.depth for _, c in grid.all_children() if isinstance(c, lmb.Place) and c.mode == lmb.MODE_PLACE
-                  and c.name and lm.symbols[c.name].startswith('face_panel_')]
-        depth = max(panels) + 1
-        lm.insert_depth(grid, depth)
-        xs = [lm.matrices[p[0][2].posid][4] if p[0][2].posflags == lmb.POS_MATRIX else None for p in pitch]
-        top = lm.matrices[beside[0][2].posid][5] if beside[0][2].posflags == lmb.POS_MATRIX else None
-        if top is None or None in xs:
-            return
         dx = (xs[1] - xs[0]) * self.cell['columns']
-        in_top = self.cell['grid_row'] == 0
+        in_top = self.cell['grid_row'] <= 0
+        row_pitch = ys[1] - ys[0]
+        # (the top row's card frame where the top row has its; above it: rows' pitches higher)
+        y = top + _card_offset(lm, panel, other) + row_pitch * self.cell['grid_row'] if in_top \
+            else _place_xy(lm, place)[1]
+        # in the grid: everything the panel below does, at a new depth after the panels of its row and the rows
+        # above it (a row's panels draw over the row above them)
+        panels = [(c.depth, _place_xy(lm, c)[1]) for _, c in grid.all_children() if isinstance(c, lmb.Place)
+                  and c.mode == lmb.MODE_PLACE and c.name and lm.symbols[c.name].startswith('face_panel_')]
+        above = [d for d, py in panels if py is not None and py <= y + row_pitch / 2]
+        depth = max(above) + 1 if above else min(d for d, _ in panels)
+        lm.insert_depth(grid, depth)
 
         def to_cell(m):
             m[4] += dx
             if in_top:
-                m[5] = top
+                m[5] = y
             return m
 
         def to_cell_position(p):
             p[0] += dx
             if in_top:
-                p[1] = top
+                p[1] = y
             return p
         lm.clone_depth(grid, place.depth, depth, char=sid, name='face_panel_' + self.code,
                        matrix_fn=to_cell, position_fn=to_cell_position)
@@ -684,6 +797,149 @@ class Layout:
         return lmb.Graphic(None, verts, list(g.indices), g.fill)
 
 
+def four_rows(lm):
+    """Layout `lm` (a select screen's, with the grid panels) made for the grid with a new top row (see ROWS_DOWN).
+    -> whether it was one."""
+    def y_of(name):
+        hit = lm.find_named(name)
+        return lm.matrices[hit[0][2].posid][5] if hit and hit[0][2].posflags == lmb.POS_MATRIX else None
+
+    hit = lm.find_named('face_panel_' + ROW_PITCH_FROM[0])
+    random = lm.find_named('random_face_panel')
+    if not hit or not random or None in _place_xy(lm, random[0][2]):
+        return False
+    grid = hit[0][0]
+    y0, y1 = _y_extent(lm, random[0][2].char)
+    old = (_place_xy(lm, random[0][2])[1] + y0, _place_xy(lm, random[0][2])[1] + y1)   # the '?' panel: three rows
+    new = (old[0], old[1] + ROWS_DOWN)                                                 # four
+    scale = (new[1] - new[0]) / (old[1] - old[0])
+    line = y_of('face_waku_up_line_2')
+    labels = lm.labels_of(grid)
+    stage, out = labels.get(STAGE_LABEL, 1 << 30), labels.get(OUT_LABEL, 1 << 30)
+    symbols = lm.symbols
+
+    def kind_of(c, y, index):
+        """How an object placed at y in frame `index` moves: ('dy', amount), ('stretch',) or None (it stays)."""
+        name = symbols[c.name] if c.name else ''
+        if not name and index >= out:
+            return None                                     # (the stage cards coming in)
+        if name.startswith('face_panel_'):
+            return 'dy', ROWS_DOWN
+        if GRID_LINE.match(name) or (not name and line is not None and abs(y - line) <= 3):
+            return None                                     # (the new row is where the top row was)
+        if RANDOM_PANEL.match(name) or (not name and old[0] <= y <= old[1]
+                                        and _height(lm, c.char) >= 0.8 * (old[1] - old[0])):
+            return ('stretch',)                             # the '?' panel, the grid's end caps
+        if name in LEFT_OUT:
+            return 'dy', 1000.0
+        if name in UNDER_LINE:
+            return 'dy', ROWS_DOWN
+        if name in SPACERS or (not name and y >= old[0]):  # (the cells' flashes as the grid comes in, the band
+            return 'dy', ROWS_DOWN                          # under the grid)
+        return None
+
+    def position(c):
+        if c.posflags == lmb.POS_MATRIX:
+            return lm.matrices[c.posid][5]
+        if c.posflags == lmb.POS_POSITION:
+            return lm.positions[c.posid][1]
+        return None
+
+    def move(c, kind):
+        if kind is None or c.posflags == lmb.POS_NONE:
+            return
+        if kind[0] == 'dy':
+            if c.posflags == lmb.POS_MATRIX:
+                m = list(lm.matrices[c.posid])
+                m[5] += kind[1]
+                c.posid = lm.add_record(lmb.T_MATRICES, m)
+            else:
+                p = list(lm.positions[c.posid])
+                p[1] += kind[1]
+                c.posid = lm.add_record(lmb.T_POSITIONS, p)
+            return
+        if c.posflags == lmb.POS_MATRIX:
+            m = list(lm.matrices[c.posid])
+        else:
+            x, y = lm.positions[c.posid][:2]
+            m = [1.0, 0.0, 0.0, 1.0, x, y]
+            c.posflags = lmb.POS_MATRIX
+        m[1] *= scale
+        m[3] *= scale
+        m[5] = new[0] + (m[5] - old[0]) * scale
+        c.posid = lm.add_record(lmb.T_MATRICES, m)
+
+    kinds = {}                                              # depth: how its object moves (frames in order)
+    for f in sorted(grid.frames, key=lambda f: f.index):
+        if f.index >= stage:
+            break
+        for c in f.children:
+            if isinstance(c, lmb.Remove):
+                kinds.pop(c.depth, None)
+            elif isinstance(c, lmb.Place):
+                y = position(c)
+                if c.mode == lmb.MODE_PLACE and y is not None:
+                    kinds[c.depth] = kind_of(c, y, f.index)
+                move(c, kinds.get(c.depth))
+    for f in grid.keyframes:                                # (each the whole state of its frame)
+        if f.index >= stage:
+            continue
+        for c in f.children:
+            y = position(c) if isinstance(c, lmb.Place) else None
+            if y is not None:
+                move(c, kind_of(c, y, f.index))
+    return True
+
+
+def _place_xy(lm, c):
+    """Where placement c puts its object: (x, y), or (None, None)."""
+    if c.posflags == lmb.POS_MATRIX:
+        return tuple(lm.matrices[c.posid][4:6])
+    if c.posflags == lmb.POS_POSITION:
+        return tuple(lm.positions[c.posid][:2])
+    return None, None
+
+
+def _y_extent(lm, cid, depth=0):
+    """(top, bottom) of character cid (its first frame's shapes, through its sprites; (0, 0) for nothing)."""
+    ch = lm.char(cid)
+    if isinstance(ch, lmb.Shape):
+        boxes = [g.xy_box() for g in ch.graphics]
+        return (min(b[1] for b in boxes), max(b[3] for b in boxes)) if boxes else (0.0, 0.0)
+    if not isinstance(ch, lmb.Sprite) or not ch.frames or depth > 8:
+        return 0.0, 0.0
+    ends = []
+    for c in ch.frames[0].children:
+        if isinstance(c, lmb.Place) and c.mode == lmb.MODE_PLACE:
+            top, bottom = _y_extent(lm, c.char, depth + 1)
+            scale = lm.matrices[c.posid][3] if c.posflags == lmb.POS_MATRIX else 1.0
+            y = _place_xy(lm, c)[1] or 0.0
+            ends += [y + top * scale, y + bottom * scale]
+    return (min(ends), max(ends)) if ends else (0.0, 0.0)
+
+
+def _height(lm, cid):
+    """How tall character cid is."""
+    top, bottom = _y_extent(lm, cid)
+    return abs(bottom - top)
+
+
+def _card_offset(lm, panel, other):
+    """How much lower panel sprite `panel` must be placed for the card frame it shares with sprite `other` (a
+    character both show, in any of their frames: their labels differ in order) to be where `other` has it (0 when
+    they share none)."""
+    def places(sprite):
+        out = {}
+        for f in sorted(sprite.frames, key=lambda f: f.index):
+            for c in f.children:
+                if isinstance(c, lmb.Place) and c.mode == lmb.MODE_PLACE and _place_xy(lm, c)[1] is not None:
+                    out.setdefault(c.char, _place_xy(lm, c)[1])
+        return out
+    mine, theirs = places(panel), places(other)
+    common = [cid for cid in mine if cid in theirs]
+    return theirs[common[0]] - mine[common[0]] if common else 0.0
+
+
 # ------------------------------------------------------------------------------------------------ portraits
 
 def portrait(sources, others, player2, fade):
@@ -748,10 +1004,21 @@ def portrait_files(sources, archives, rpx):
     return files
 
 
+CUT_TRANSPARENT = 0.01      # a costume picture with more than this share of pixels under half alpha has its
+                            # background transparent (Tekken 8's); Tekken 7's are opaque (alpha 242 at the least)
+CUT_ALPHA = 8               # ... and its fighter is where alpha is at least this (of 255)
+
+
 def cut_out(img):
-    """A Tekken 7 costume-slot picture (H, W, 4 uint8) -> the fighter alone (h, w, 4 floats) cut to it, or None.
-    The panel's background is a smooth neutral grey (red = green, blue a little higher), reached from the panel's
-    edges in small steps; everything else on the panel is the fighter."""
+    """A costume picture (H, W, 4 uint8) -> the fighter alone (h, w, 4 floats) cut to it, or None. On a
+    transparent background (Tekken 8's) the fighter is what is not transparent. On Tekken 7's costume-slot panel
+    the background is a smooth neutral grey (red = green, blue a little higher), reached from the panel's edges in
+    small steps; everything else on the panel is the fighter."""
+    if (img[..., 3] < 128).mean() > CUT_TRANSPARENT:
+        ys, xs = np.nonzero(img[..., 3] >= CUT_ALPHA)
+        if not len(ys):
+            return None
+        return _float(img[ys.min():ys.max() + 1, xs.min():xs.max() + 1])
     rgb = img[..., :3].astype(np.int32)
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
     white = (rgb > 240).all(-1)
@@ -783,12 +1050,13 @@ def cut_out(img):
     return out[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
 
 
-def costume_previews(paks, archives, rpx, d, slot):
-    """The chooser's container for the fighter: one picture, its costume (NTP3 bytes), or None."""
+def costume_previews(source, archives, rpx, d, slot):
+    """The chooser's container for the fighter: one picture, its costume (NTP3 bytes), or None. source: its
+    picture source (or Tekken 7's paks)."""
     path = d.ART.get('costume') if hasattr(d, 'ART') else None
     if not path:
         return None
-    fighter = cut_out(Texture2D(load(paks, path)).decode())
+    fighter = cut_out(picture_source(source).picture(path))
     if fighter is None:
         return None
     textures = []
@@ -868,12 +1136,13 @@ def codes_in(lm):
     return found
 
 
-def pack_files(paks, archives, rpx, d, slot, log=None):
+def pack_files(source, archives, rpx, d, slot, log=None):
     """The fighter's own pictures for its pack: the loading and VS screens' portraits and the costume chooser's
-    picture. -> {file name: bytes}."""
-    sources = Sources(paks, d)
+    picture. -> {file name: bytes}. source: the fighter's picture source (or Tekken 7's paks)."""
+    source = picture_source(source)
+    sources = Sources(source, d)
     files = portrait_files(sources, archives, rpx)
-    costumes = costume_previews(paks, archives, rpx, d, slot)
+    costumes = costume_previews(source, archives, rpx, d, slot)
     if costumes is not None:
         files[COSTUME_FILE] = costumes
     if log:
@@ -882,10 +1151,12 @@ def pack_files(paks, archives, rpx, d, slot, log=None):
     return files
 
 
-def shared_files(paks, archives, rpx, fighters, log=None):
+def shared_files(source, archives, rpx, fighters, log=None, new_row=False):
     """What the added fighters share, for fighters [(slot, definition)]: the 2D layouts with every fighter's labels
     and grid cell, the big portraits' container with two frames per place, the HUD's pictures by place.
-    -> {file name: bytes}. rpx: the title's executable (ttt2.rpx)."""
+    -> {file name: bytes}. source: the fighters' picture source (one for all, by slot or code, or by definition:
+    source_of; or Tekken 7's paks); rpx: the title's executable (ttt2.rpx); new_row: the select grid with a new top
+    row (four_rows), for fighters past pack.CELLS."""
     fighters = sorted(fighters, key=lambda f: f[0])
     files = {}
     # the game's fighters' codes: from every layout's labels `face_<code>` and `face_panel_<code>`
@@ -902,7 +1173,7 @@ def shared_files(paks, archives, rpx, fighters, log=None):
     codes = [PAUL] + sorted(codes - {PAUL})
     sources = {}
     for slot, d in fighters:
-        sources[slot] = Sources(paks, d)
+        sources[slot] = Sources(source_of(source, slot, d), d)
         sources[slot].short_name = getattr(d, 'SHORT_NAME', d.NAME.split()[0].upper())
     # the fighters' names in the title's lettering, learnt from the select screen's names
     letters = None
@@ -920,7 +1191,7 @@ def shared_files(paks, archives, rpx, fighters, log=None):
         if log:
             made = letters.picture(sources[slot].short_name) if letters else None
             log('%s in the title\'s letters: %s' % (d.NAME, '%d x %d' % made.shape[1::-1] if made is not None
-                                                   else 'no (the Tekken 7 name picture instead)'))
+                                                   else 'no (its game\'s name picture instead)'))
     count = 0
     for i, key, tkey in entries:
         if i not in blobs:
@@ -952,6 +1223,8 @@ def shared_files(paks, archives, rpx, fighters, log=None):
             pages += new
         if not changed:
             continue
+        if new_row:
+            four_rows(lm)
         files['keys/%08x.bin' % key] = lm.write()
         if pages:
             files['keys/%08x.add' % tkey] = nut.write(pages)

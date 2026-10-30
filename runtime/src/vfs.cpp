@@ -4,9 +4,7 @@
 #include "title/archive.h"
 #include "wua.h"
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "host/file_io.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -62,9 +60,9 @@ struct Dir {
 };
 std::unordered_map<int32_t, File> g_files;
 
-// watch_entry_reads: the callback, and each archive's entries as {start,
+// watch_entry_reads: the callbacks, and each archive's entries as {start,
 // end, name hash} in its .bin, sorted.
-std::function<void(uint32_t)> g_entry_reader;
+std::vector<std::function<void(uint32_t)>> g_entry_readers;
 // TTT2_TRACE_ENTRIES=1: every archive entry the title reads, with the time.
 const bool g_trace_entries = std::getenv("TTT2_TRACE_ENTRIES") != nullptr;
 const auto g_trace_start = std::chrono::steady_clock::now();
@@ -199,11 +197,11 @@ Status open_host(const fs::path& path, std::string_view mode, int32_t& handle) {
     case 'a': flags = (plus ? O_RDWR : O_WRONLY) | O_CREAT; file.writable = true; file.append = true; file.readable = plus; break;
     default: return kAccessError;
     }
-    struct stat st;
-    if (::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return kNotFile;
-    file.fd = ::open(path.c_str(), flags | O_CLOEXEC, 0644);
+    host::io::Stat st;
+    if (host::io::stat(path, &st) == 0 && host::io::is_directory(st)) return kNotFile;
+    file.fd = host::io::open(path, flags, 0644);
     if (file.fd < 0) return from_errno(errno);
-    fstat(file.fd, &st);
+    host::io::fstat(file.fd, &st);
     file.size = static_cast<uint64_t>(st.st_size);
     handle = g_next_handle++;
     g_files[handle] = file;
@@ -211,9 +209,9 @@ Status open_host(const fs::path& path, std::string_view mode, int32_t& handle) {
 }
 
 Status stat_host(const fs::path& path, Stat& stat) {
-    struct stat st;
-    if (::stat(path.c_str(), &st) != 0) return from_errno(errno);
-    stat.directory = S_ISDIR(st.st_mode);
+    host::io::Stat st;
+    if (host::io::stat(path, &st) != 0) return from_errno(errno);
+    stat.directory = host::io::is_directory(st);
     stat.size = stat.directory ? 0 : static_cast<uint64_t>(st.st_size);
     return kOk;
 }
@@ -234,11 +232,11 @@ Status list_host(const fs::path& path, Dir& dir) {
 Status open_underlying(const std::string& relative, File& file) {
     if (!g_source.archive) {
         const fs::path path = game_host_path(relative);
-        struct stat st;
-        if (::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return kNotFile;
-        file.fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+        host::io::Stat st;
+        if (host::io::stat(path, &st) == 0 && host::io::is_directory(st)) return kNotFile;
+        file.fd = host::io::open(path, O_RDONLY);
         if (file.fd < 0) return from_errno(errno);
-        fstat(file.fd, &st);
+        host::io::fstat(file.fd, &st);
         file.size = static_cast<uint64_t>(st.st_size);
         return kOk;
     }
@@ -255,8 +253,8 @@ uint64_t read_underlying(const File& file, uint64_t position, uint64_t size, voi
     if (file.archive) return g_source.archive->ReadFromFile(file.node, position, size, buffer);
     uint64_t transferred = 0;
     while (transferred < size) {
-        const ssize_t n = ::pread(file.fd, static_cast<uint8_t*>(buffer) + transferred, size - transferred,
-                                  static_cast<off_t>(position + transferred));
+        const int64_t n = host::io::pread(file.fd, static_cast<uint8_t*>(buffer) + transferred, size - transferred,
+                                  position + transferred);
         if (n <= 0) break;
         transferred += static_cast<uint64_t>(n);
     }
@@ -269,7 +267,7 @@ std::optional<std::vector<uint8_t>> read_underlying(const std::string& relative,
     if (open_underlying(relative, file) != kOk) return std::nullopt;
     std::vector<uint8_t> data(std::min(file.size, limit));
     const uint64_t n = read_underlying(file, 0, data.size(), data.data());
-    if (file.fd >= 0) ::close(file.fd);
+    if (file.fd >= 0) host::io::close(file.fd);
     if (n != data.size()) return std::nullopt;
     return data;
 }
@@ -308,7 +306,7 @@ std::vector<uint32_t> entries_read(const std::string& archive, uint64_t start, u
 
 void watch_entry_reads(std::function<void(uint32_t)> reader) {
     std::lock_guard lock(g_mutex);
-    g_entry_reader = std::move(reader);
+    g_entry_readers.push_back(std::move(reader));
 }
 
 bool set_archive_entries(const std::string& archive, const std::map<uint32_t, std::vector<uint8_t>>& stored) {
@@ -333,9 +331,9 @@ void open_game(const fs::path& source) {
         return;
     }
     g_source.archive.reset(ZArchiveReader::OpenFromFile(source));
-    if (!g_source.archive) fatal("cannot open game archive %s", source.c_str());
+    if (!g_source.archive) fatal("cannot open game archive %s", source.string().c_str());
     g_source.layers = wua::game_layers(*g_source.archive);
-    if (g_source.layers.empty()) fatal("%s does not contain a title with code/Tekken.rpx", source.c_str());
+    if (g_source.layers.empty()) fatal("%s does not contain a title with code/Tekken.rpx", source.string().c_str());
     if (g_source.layers.size() > 1) {
         std::string order;
         for (const std::string& layer : g_source.layers) order += (order.empty() ? "" : " over ") + layer;
@@ -404,7 +402,7 @@ Status open_file_impl(std::string_view path, std::string_view mode, int32_t& han
 Status open_file(std::string_view path, std::string_view mode, int32_t& handle) {
     std::lock_guard lock(g_mutex);
     const Status status = open_file_impl(path, mode, handle);
-    if (status == kOk && (g_entry_reader || g_trace_entries)) {
+    if (status == kOk && (!g_entry_readers.empty() || g_trace_entries)) {
         const Resolved r = resolve(path);
         const std::string name = lower(r.relative);
         if (r.area == Area::kGame && name.size() > 4 && name.compare(name.size() - 4, 4, ".bin") == 0 &&
@@ -419,7 +417,7 @@ Status close_file(int32_t handle) {
     std::lock_guard lock(g_mutex);
     const auto it = g_files.find(handle);
     if (it == g_files.end()) return kFatal;
-    if (it->second.fd >= 0) ::close(it->second.fd);
+    if (it->second.fd >= 0) host::io::close(it->second.fd);
     g_files.erase(it);
     return kOk;
 }
@@ -459,14 +457,14 @@ Status read_file(int32_t handle, void* buffer, uint64_t size, std::optional<uint
             transferred = read_underlying(file, file.position, want, buffer);
         }
     }
-    std::function<void(uint32_t)> reader;
+    std::vector<std::function<void(uint32_t)>> readers;
     std::vector<uint32_t> read_entries;
     {
         std::lock_guard lock(g_mutex);
         const auto it = g_files.find(handle);
         if (it != g_files.end()) it->second.position = file.position + transferred;
-        if ((g_entry_reader || g_trace_entries) && !file.archive_bin.empty() && transferred != 0) {
-            reader = g_entry_reader;
+        if ((!g_entry_readers.empty() || g_trace_entries) && !file.archive_bin.empty() && transferred != 0) {
+            readers = g_entry_readers;
             read_entries = entries_read(file.archive_bin, file.position, file.position + transferred);
         }
     }
@@ -475,7 +473,7 @@ Status read_file(int32_t handle, void* buffer, uint64_t size, std::optional<uint
             const double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_trace_start).count();
             std::fprintf(stderr, "entry: %8.3f %s %08x\n", t, file.archive_bin.c_str() + 12, hash);
         }
-        if (reader) reader(hash);
+        for (const auto& reader : readers) reader(hash);
     }
     return kOk;
 }
@@ -491,9 +489,10 @@ Status write_file(int32_t handle, const void* buffer, uint64_t size, std::option
     if (file.append) file.position = file.size;
     transferred = 0;
     while (transferred < size) {
-        const ssize_t n = ::pwrite(file.fd, static_cast<const uint8_t*>(buffer) + transferred,
-                                   size - transferred, static_cast<off_t>(file.position + transferred));
+        const int64_t n = host::io::pwrite(file.fd, static_cast<const uint8_t*>(buffer) + transferred,
+                                   size - transferred, file.position + transferred);
         if (n < 0) return from_errno(errno);
+        if (n == 0) return kMediaError;
         transferred += static_cast<uint64_t>(n);
     }
     file.position += transferred;
@@ -530,7 +529,7 @@ Status flush_file(int32_t handle) {
     std::lock_guard lock(g_mutex);
     const auto it = g_files.find(handle);
     if (it == g_files.end()) return kFatal;
-    if (it->second.fd >= 0) ::fsync(it->second.fd);
+    if (it->second.fd >= 0) host::io::flush(it->second.fd);
     return kOk;
 }
 

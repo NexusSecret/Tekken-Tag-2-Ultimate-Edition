@@ -1,8 +1,8 @@
 """Eliza from Tekken 7 (PC), in her default costume.
 
 Only names, paths and rules live here; every byte of her model, textures and moveset is read from the player's own
-Tekken 7 and Tekken Tag Tournament 2 files when the importer runs. Her meter (the gauge her EX moves and Super
-spend in Tekken 7) is not converted.
+Tekken 7 and Tekken Tag Tournament 2 files when the importer runs. Her EX moves, Super and cancels spend her
+gauge as in Tekken 7 (GAUGE, convert/gauge.py).
 """
 NAME = 'Eliza'
 SHORT_NAME = 'ELIZA'          # her name on the 2D screens
@@ -11,6 +11,19 @@ TEKKEN7_ID = 36               # her id in Tekken 7's roster (TKMovesets2 writes 
 TEKKEN7_CODE = 'elz'          # her code in Tekken 7's files (AkBankVoiceELZ.bnk, Item/Meshes/elz/)
 CODE = 'elz'                  # her three-letter code in the pack (not a code TTT2 already has)
 SEX = 'female'
+REVISION = 2                  # her gauge (1: packs made before have her EX moves free); its full sound (2)
+
+# Ordered built-in Tekken 7 preset sets for the native costume chooser.
+PRESETS = (
+    ('DefaultCos1P', 'Default'),
+    ('DefaultCos2P', 'Default 2P'),
+    ('1p_c1', '1p c1'),
+    ('bikini_big', 'Bikini big'),
+    ('goth', 'Goth'),
+    ('goth_c1', 'Goth c1'),
+    ('vampire', 'Vampire'),
+    ('vampire_silver', 'Vampire silver'),
+)
 
 DONOR = 'jun'                 # Jun Kazama: the 139-bone female skeleton
 DONOR_ROW = 42                # Jun's motion row (data005 / data006 entry)
@@ -113,8 +126,57 @@ VOICE_PREFIX = 'vp'           # her intro and win lines' events in Tekken 7's ba
 # ------------------------------------------------------------------------------------------------ moveset
 # the id maps: Heihachi's moveset in both games, and her generic moves against some TTT2 fighters' (importer.py)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', 42), ('heihachi', 9), ('self', 23)]
+# her gauge (convert/gauge.py): two stocks of 500, Tekken 7's usual gains, her own HUD, the sound Tekken 7 plays as it
+# fills up
+GAUGE = dict(max=1000, stock=500, gain=(50, 100, 150, 300),
+             hud='/Game/UI_Common/Flash/sw_ui_hud_rage_elz/sw_ui_hud_rage_elz', full_sound='SE_battle_spgauge_full')
+
 MOVESET = {
+    # Match Noctis d/b+2 on counter hit only; retain normal-hit behavior.
+    'counterhit_reactions': {'Vp_6rkrk': 'sDw_utuharai_r'},
     'name': '[ELIZA]',
+    # Her low kick exists, but the imported neutral dispatcher omits d+4.
+    'jump_special_inputs': ('Vp_jp214lk', 'Vp_jp214rk', 'Vp_jp214wk'),
+    'neutral_inputs': {'Jn_syark00': (4, 0x40000008)},
+    # tag combos (convert/tagcombo.py) besides her launchers: Moon Glide 3,3 (its hit on a standing opponent is no
+    # launch; until 2026-10-26 it tagged out with Jun's Ju_s_tlkChg animation, now with its own)
+    'tag_combos': {'Vp_66lklk': True},
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds; Moon Glide 3,4 (Helical
+    # Flow), EX Dark Cannon's landing and the other screws stay without one
+    'bounds': {**dict.fromkeys(('Vp_4lprprk', 'Vp_4lrp2', 'Vp_9lrp2', 'Vp_9rkrp', 'Vp_shoryuC'), True),
+               **dict.fromkeys(('Vp_6rklkrk', 'Vp_rk00', 'Vp_shoryulprk', 'Vp_shoryuCDEX2', 'Vp_jp214wk_chak'), False)},
+    # Replace T7 extended-point references with native arm capsules. The
+    # original 0x8213 parameters identify hand 13 (Storm) / 9 (Tempest).
+    'hitboxes': {
+        'Vp_214A': (13, 0, 13, 12),
+        'Vp_214B': (9, 0, 9, 8),
+        'Vp_214ABEX': (9, 0, 9, 8),
+        'Vp_214ABEX2': (13, 0, 13, 12),
+    },
+    # Preserve her own crouching / WS / back-turned attacks instead of
+    # borrowing donor rows that do not contain Eliza's special-input capture.
+    'own_moves': r'^(Vp_.*|Jn_(syalp00|t_slp00)|Co_(s_tlp00|R_(rp00L|lp00R|crp00L|clp00R)))$',
+    'special_cancels': {
+        name: ('Vp_energyA', 'Vp_energyB', 'Vp_shoryu', 'Vp_shoryuB',
+               'Vp_214A', 'Vp_214B', 'Vp_shoryuC', 'Vp_shoryuD',
+               'Vp_energySP', 'Vp_shoryuAB', 'Vp_214ABEX', 'Vp_shoryuCDEX',
+               'Vp_dash_EX', 'Vp_hadohAB')
+        for name in ('Vp_lp00', 'Vp_lplp', 'Vp_rprp', 'Vp_rk00B',
+                     'Jn_syalp00', 'Jn_t_slp00', 'Vp_syalk00', 'Vp_t_slk00',
+                     'Co_s_tlp00', 'Co_R_rp00L', 'Co_R_lp00R',
+                     'Co_R_crp00L', 'Co_R_clp00R')
+    } | {'Vp_9rkrp': ('Vp_energyA', 'Vp_energyB', 'Vp_energySP', 'Vp_hadohAB'),
+         'Vp_energyA': ('Vp_dash_EX',), 'Vp_energyB': ('Vp_dash_EX',)},
+    'secondary_string_followups': {'Vp_4lprp': ('Vp_4lprprk',)},
+    'noncontact_special_cancels': ('Vp_energyA', 'Vp_energyB'),
+    'buffered_special_cancels': True,
+    'buffered_special_timing': {
+        'extra_frames': 8,
+        'source_extra_frames': {'Vp_syalk00': 12, 'Vp_t_slk00': 12, 'Co_s_tlp00': 12},
+        'motion_window': 24,
+    },
+    'normal_string_followups': {'Vp_lp00': ('Vp_lplp', 'Vp_lprp')},
+
     'drop_moves': r'^Vp_Direct$',
     'direct': [(r'^Ju_sKAM00_$', 'move', ['Jn_sKAM00_']),                       # Jun's stance -> hers
                (r'^(ju|mk)_s', 'anim', ['vp_s%02d' % k for k in range(5)]),     # intros

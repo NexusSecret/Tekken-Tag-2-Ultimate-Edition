@@ -11,6 +11,17 @@ TEKKEN7_CODE = 'nsd'
 CODE = 'nsd'
 SEX = 'female'
 
+# Ordered built-in Tekken 7 preset sets for the native costume chooser.
+PRESETS = (
+    ('DefaultCos1P', 'Default'),
+    ('DefaultCos2P', 'Default 2P'),
+    ('1p_c1', '1p c1'),
+    ('chic', 'Chic'),
+    ('chic_c1', 'Chic c1'),
+    ('vip', 'Vip'),
+    ('vip_silver', 'Vip silver'),
+)
+
 DONOR = 'jun'                 # Jun Kazama: the 139-bone female skeleton
 DONOR_ROW = 42
 
@@ -63,6 +74,9 @@ VOICE_PREFIX = 'nd'
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 MOVESET = {
     'name': '[LIDIA]',
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
+    'bounds': dict.fromkeys(('Nd_2lp', 'Nd_4lprp', 'Nd_66rphrk', 'Nd_6rklklp', 'Nd_9lk', 'Nd_steprk',
+                             'Nd_yokorp'), True),
     'drop_moves': r'^Nd_Direct$',
     'direct': [(r'^(ju|mk)_s', 'anim', ['nd_s%02d' % k for k in range(3)]),     # the donor's intros -> her
                (r'^ju_w', 'anim', ['nd_w%02d' % k for k in range(3)])],         # win poses

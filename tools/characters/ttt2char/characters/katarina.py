@@ -11,6 +11,20 @@ TEKKEN7_CODE = 'ltn'
 CODE = 'ltn'
 SEX = 'female'
 
+# Ordered built-in Tekken 7 preset sets for the native costume chooser.
+PRESETS = (
+    ('DefaultCos1P', 'Default'),
+    ('DefaultCos2P', 'Default 2P'),
+    ('1p_c1', '1p c1'),
+    ('army', 'Army'),
+    ('army_silver', 'Army silver'),
+    ('hotpants', 'Hotpants'),
+    ('loose', 'Loose'),
+    ('sd', 'Sd'),
+    ('sd_c1', 'Sd c1'),
+    ('sd_off', 'Sd off'),
+)
+
 DONOR = 'jun'                 # Jun Kazama: the 139-bone female skeleton
 DONOR_ROW = 42
 
@@ -62,7 +76,12 @@ VOICE_PREFIX = 'ln'
 # the id maps: Heihachi in both games, and her generic moves against TTT2's (Heihachi, the donor, Asuka)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 MOVESET = {
+    # Match Noctis d/b+2 on counter hit only; retain normal-hit behavior.
+    'counterhit_reactions': {'Ln_t_srkF': 'sDw_utuharai_l', 'Ln_3lrk': 'sDw_utuharai_l'},
     'name': '[KATARINA]',
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
+    'bounds': dict.fromkeys(('Ln_2lp', 'Ln_4rklrp', 'Ln_6lk', 'Ln_6lrp', 'Ln_6rkrp', 'Ln_9lrk2', 'Ln_9rkrk', 'Ln_lk05',
+                             'Ln_lplplk', 'Ln_lplplp', 'Ln_runlk00'), True),
     'drop_moves': r'^Ln_Direct$',
     'direct': [(r'^(ju|mk)_s', 'anim', ['ln_s%02d' % k for k in range(5)]),     # the donor's intros -> her
                (r'^ju_w', 'anim', ['ln_w%02d' % k for k in range(3)])],         # win poses

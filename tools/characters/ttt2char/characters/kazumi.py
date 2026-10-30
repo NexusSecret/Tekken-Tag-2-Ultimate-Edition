@@ -10,6 +10,18 @@ TEKKEN7_CODE = 'kzm'          # her code in Tekken 7's files (AkBankVoiceKZM.bnk
 CODE = 'kzm'                  # her three-letter code in the pack (not a code TTT2 already has)
 SEX = 'female'
 
+PRESETS = (
+    ('DefaultCos1P', 'Default'),
+    ('DefaultCos2P', 'Default 2P'),
+    ('1p_c2', 'Default alternate'),
+    ('dancer', 'Dancer'),
+    ('dancer_silver', 'Dancer silver'),
+    ('dougi', 'Dougi'),
+    ('lycoris', 'Lycoris'),
+    ('lycoris_c1', 'Lycoris alternate'),
+    ('taisyo_roman', 'Taisho Roman'),
+)
+
 # The donor: a TTT2 fighter with a similar body and style. Its skeleton is the base of hers, its materials are the
 # templates of hers, its moveset gives the generic and tag moves, and its voice and effects are used for her.
 DONOR = 'jun'                 # Jun Kazama: the 139-bone female skeleton
@@ -129,6 +141,8 @@ VOICE_PREFIX = 'ka'
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', 42), ('heihachi', 9), ('self', 23)]
 MOVESET = {
     'name': '[KAZUMI]',
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
+    'bounds': dict.fromkeys(('Ka_1lrp', 'Ka_3lprp', 'Ka_66rk', 'Ka_6lrklk', 'Ka_9lkrklp', 'Ka_lkrp'), True),
     # her own moves that are not converted (besides Rage Arts and story moves): customisation and story
     # variants, and her round-start move Ka_Direct (the donor's is kept)
     'drop_moves': r'^kz_co|^kz_90|Ka_Direct|^ka_sp',

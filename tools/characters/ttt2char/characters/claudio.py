@@ -11,6 +11,19 @@ TEKKEN7_CODE = 'ita'
 CODE = 'ita'
 SEX = 'male'
 
+# Ordered built-in Tekken 7 preset sets for the native costume chooser.
+PRESETS = (
+    ('DefaultCos1P', 'Default'),
+    ('DefaultCos2P', 'Default 2P'),
+    ('1p_c1', '1p c1'),
+    ('belts', 'Belts'),
+    ('belts_silver', 'Belts silver'),
+    ('hillbilly', 'Hillbilly'),
+    ('hillbilly_c1', 'Hillbilly c1'),
+    ('pat_shirt', 'Pat shirt'),
+    ('scarf_suit', 'Scarf suit'),
+)
+
 DONOR = 'lar'                 # Lars Alexandersson: a slim male skeleton
 DONOR_ROW = 38
 
@@ -63,7 +76,12 @@ VOICE_PREFIX = 'it'
 # the id maps: Heihachi in both games, and his generic moves against TTT2's (Heihachi, the donor, Asuka)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 MOVESET = {
+    # Match Noctis d/b+2 on counter hit only; retain normal-hit behavior.
+    'counterhit_reactions': {'It_siderk00': 'sDw_utuharai_r'},
     'name': '[CLAUDIO]',
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
+    'bounds': dict.fromkeys(('It_4lklk', 'It_4rklkrp', 'It_4rklkrpn', 'It_66rprp', 'It_chest', 'It_lrp2', 'It_lrp2n',
+                             'It_rk00F', 'It_rplp', 'It_spam'), True),
     'drop_moves': r'^It_Direct$',
     'direct': [(r'^(la|mk)_s', 'anim', ['it_s%02d' % k for k in range(4)]),     # Lars's intros -> his
                (r'^la_w', 'anim', ['it_w%02d' % k for k in range(3)])],         # win poses

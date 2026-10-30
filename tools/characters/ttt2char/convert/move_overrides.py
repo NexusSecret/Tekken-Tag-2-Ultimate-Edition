@@ -1,0 +1,669 @@
+"""Opt-in gameplay edits applied before generating Tag Assault twins."""
+from . import tagsystem as TS
+
+# The string buffer of the fighter's game (a variable a capture row sets and a dispatch row tests: Tekken 7's 352 /
+# 0x80a6, Tekken 8's counterparts in the id maps between the two games); the id maps give TTT2's (313 / 0x8096)
+STRING_VAR, STRING_SET = {'t7': 352, 't8': 358}, {'t7': 0x80a6, 't8': 0x80c5}
+LATCHES = 4                     # TTT2's latches: the string buffer is the first of four, 313..316 (moveset.py)
+
+
+
+def normalize_stance_input(c, name, source_mode, native_mode):
+    """Opt-in a finite, exact multi-button stance input to native input handling.
+
+    Keep the original mask, guards, animation start and selection window. Copy
+    cancel lists before changing them, including when multiple moves share one.
+    The target attack/automatic continuation and all reactions are untouched.
+    """
+    if source_mode != 0x185 or native_mode != 0x182:
+        raise ValueError('unsupported stance input modes: ' + name)
+    target = c.newidx[c.kn[name]]
+    eligible = 0
+    extra = next((i for i, x in enumerate(c.T['cancel_extras']) if x['value'] == native_mode), None)
+    for move in c.T['moves']:
+        rows = TS.cancels(c.T, move['cancel'])
+        out, changed = [], False
+        for row in rows:
+            value = c.T['cancel_extras'][row['extradata']]['value'] if row['extradata'] is not None else None
+            if row['move_id'] == target and value in (source_mode, native_mode) and row['direction'] == 0                     and row['button'] == 0x4000000c and 1 <= row['win_start'] <= row['win_end'] < 180:
+                eligible += 1
+                if value == source_mode:
+                    if extra is None:
+                        extra = len(c.T['cancel_extras']);c.T['cancel_extras'].append(dict(value=native_mode))
+                    row = dict(row, extradata=extra);changed = True
+                    c.stats['native stance inputs restored'] += 1
+            out.append(dict(row))
+        if changed:
+            move['cancel'] = TS.write(c.T, 'cancels', out)
+    if not eligible:
+        raise ValueError('no finite simultaneous-button stance input found: ' + name)
+
+
+def replace_generic_inputs(c, replacements):
+    """Route explicitly selected native inputs to retained source attacks.
+
+    Keep every row's direction, requirements, timing and priority. Native
+    groups can still name the donor copy after own_moves adds a source copy;
+    do not redirect other buttons sharing that donor attack.
+    """
+    from . import idmaps as M
+    targets = {}
+    for name, button in replacements.items():
+        if button != 0x40000001:
+            raise ValueError('unsupported generic input replacement: ' + name)
+        if name not in c.dn or name not in c.kn or c.kn[name] not in c.newidx:
+            raise ValueError('generic input replacement lacks retained attack: ' + name)
+        targets[(c.dn[name], button)] = c.newidx[c.kn[name]]
+    count = 0
+    for table in ('cancels', 'group_cancels'):
+        for i, row in enumerate(c.T[table]):
+            if row['direction'] in (M.GROUP, M.GROUP_END, M.LIST_END):
+                continue
+            target = targets.get((row['move_id'], row['button']))
+            if target is not None:
+                c.T[table][i] = dict(row, move_id=target)
+                count += 1
+    c.stats['native inputs routed to retained attacks'] += count
+    return count
+
+
+def apply(c):
+    replacements = c.defn.MOVESET.get('generic_input_replacements', {})
+    if replacements:
+        replace_generic_inputs(c, replacements)
+    for target, (source_mode, native_mode) in c.defn.MOVESET.get('native_stance_inputs', {}).items():
+        normalize_stance_input(c, target, source_mode, native_mode)
+    for source in c.defn.MOVESET.get("free_air_screws", ()):
+        free_air_screw(c, source)
+    for source in c.defn.MOVESET.get("source_air_reactions", ()):
+        restore_air_reaction(c, source)
+    for source in c.defn.MOVESET.get("air_hit_strings", ()):
+        air_hit_string(c, source)
+    for source in c.defn.MOVESET.get('hitgrab_followups', ()):
+        restore_hitgrab_followups(c, source)
+    for source, target in c.defn.MOVESET.get('on_hit_followups', {}).items():
+        on_hit_followup(c, source, target)
+    for name, reaction in c.defn.MOVESET.get('counterhit_reactions', {}).items():
+        counterhit_reaction(c, name, reaction)
+    # Explicit neutral inputs only: do not add attack cancels or alter recovery.
+    for name, (direction, button) in c.defn.MOVESET.get('neutral_inputs', {}).items():
+        target = c.newidx[c.kn[name]]
+        empty = c.add('requirements', dict(condition=690, param=0))
+        extra = c.add('cancel_extras', dict(value=0x182))
+        for alias in (1, 2):  # standing and fully crouched
+            move = c.T['moves'][c.aliases[alias]]
+            rows = [dict(row) for row in TS.cancels(c.T, move['cancel'])]
+            # Keep native tag/throw checks first; precede attack dispatch groups.
+            at = next(i for i, row in enumerate(rows) if row['direction'] == 0x800B)
+            rows.insert(at, dict(direction=direction, button=button, req=empty,
+                                 extradata=extra, win_start=1, win_end=32767,
+                                 start_frame=1, move_id=target, option=0))
+            move['cancel'] = TS.write(c.T, 'cancels', rows)
+        c.stats['explicit neutral inputs restored'] += 1
+    for name, frames in c.defn.MOVESET.get('recovery_trim', {}).items():
+        trim_recovery(c, name, frames)
+    for name, frames in c.defn.MOVESET.get('startup_trim', {}).items():
+        trim_startup(c, name, frames)
+    for name, damage in c.defn.MOVESET.get('damage', {}).items():
+        if type(damage) is not int or not 0 <= damage <= 255:
+            raise ValueError('damage must be an integer from 0 to 255: ' + name)
+        move = c.T['moves'][c.newidx[c.kn[name]]]
+        hits = [dict(hit, damage=damage) for hit in TS.hits(c.T, move['hit_condition'])]
+        if not hits:
+            raise ValueError('no hit conditions for damage override: ' + name)
+        move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
+        c.stats['explicit move damage overrides'] += 1
+    for name, bound in c.defn.MOVESET.get('bounds', {}).items():
+        set_bound(c, name, bound)
+
+    for name, locations in c.defn.MOVESET.get('hitboxes', {}).items():
+        c.T['moves'][c.newidx[c.kn[name]]]['hitbox'] = bytes(c.hit_location(x) for x in locations)
+    for name, reaction in c.defn.MOVESET.get('downed_reactions', {}).items():
+        downed_reaction(c, name, reaction)
+    for name, template in c.defn.MOVESET.get('air_reactions', {}).items():
+        # Use a native airborne reaction, not a vertical offset on every hit.
+        reference = getattr(c, 'air_reaction_reference', c.d)
+        if isinstance(template, tuple):
+            row, template = template
+            reference = c.air_reaction_references[row]
+        names = c.dn if reference is c.d else {reference.move_name(i): i for i in range(len(reference.tables['moves']))}
+        donor = reference.tables['moves'][names[template]]
+        native = [h for h in TS.hits(reference.tables, donor['hit_condition'])
+                  if TS.has(reference.tables, h['req'], TS.AIR)]
+        if len(native) != 1:
+            raise ValueError('no unique native airborne reaction: ' + template)
+        row = dict(reference.tables['reactions'][native[0]['reactions']])
+        if reference is not c.d:
+            from ..movesets import TTT2
+            for field, _, _, link in TTT2['reactions'][1]:
+                if link == 'move':
+                    row[field] = c.dn[reference.move_name(reference.resolve_alias(row[field]))]
+                elif link == 'pushbacks':
+                    push = dict(reference.tables['pushbacks'][row[field]])
+                    extras = push['extradata']
+                    if extras is not None:
+                        push['extradata'] = len(c.T['pushback_extras'])
+                        c.T['pushback_extras'].extend(dict(x) for x in
+                            reference.tables['pushback_extras'][extras:extras + push['loops']])
+                    row[field] = c.add('pushbacks', push)
+        reaction = c.add('reactions', row)
+        move = c.T['moves'][c.newidx[c.kn[name]]]
+        hits = [dict(h) for h in TS.hits(c.T, move['hit_condition'])]
+        changed = 0
+        for hit in hits:
+            if TS.has(c.T, hit['req'], TS.AIR) and not TS.has(c.T, hit['req'], TS.BOUND):
+                hit['reactions'] = reaction
+                changed += 1
+        if not changed:
+            raise ValueError('no airborne hit condition: ' + name)
+        move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
+        c.stats['airborne reactions replaced from native template'] += changed
+    for source, target in c.defn.MOVESET.get('buffered_stance_transitions', {}).items():
+        buffered_stance_transition(c, source, target)
+
+    for source, target in c.defn.MOVESET.get('stance_transitions', {}).items():
+        move = c.T['moves'][c.newidx[c.kn[source]]]
+        rows = [dict(row) for row in TS.cancels(c.T, move['cancel'])]
+        index = c.newidx[c.kn[target]]
+        reference = c.stance_reference
+        entry_name, state_name = c.defn.MOVESET['stance_reference'][1:]
+        names = {reference.move_name(i): i for i in range(len(reference.tables['moves']))}
+        entry = reference.tables['moves'][names[entry_name]]
+        native_state = reference.tables['moves'][names[state_name]]
+        from . import idmaps as M
+        native = next(row for row in M.cancels(reference, entry['cancel'])
+                      if row['direction'] == 64 and row['button'] == 0
+                      and reference.resolve_alias(row['move_id']) == names[state_name])
+        value = reference.tables['cancel_extras'][native['extradata']]['value']
+        extra = c.extra_index.get(value)
+        if extra is None:
+            extra = c.add('cancel_extras', dict(value=value))
+            c.extra_index[value] = extra
+        # Retain SET's other flags; match the native stance's bit 0x20.
+        stance = c.T['moves'][index]
+        stance['bitfield'] = (stance['bitfield'] & ~0x20) | (native_state['bitfield'] & 0x20)
+        matches = 0
+        for row in rows:
+            if row['move_id'] == index and row['direction'] == 64 and row['button'] == 0:
+                row['extradata'] = extra
+                matches += 1
+        if matches != 1:
+            raise ValueError('no unique forward stance transition: ' + source)
+        move['cancel'] = TS.write(c.T, 'cancels', rows)
+
+    for name in c.defn.MOVESET.get('direct_buffered_strings', ()):
+        direct_buffered_string(c, name)
+    normalize_buffered_strings(c)
+
+
+def direct_buffered_string(c, name):
+    """Expose a buffered follow-up as a native direct input, retaining its gates."""
+    variable = c.map_req(STRING_VAR[c.game])
+    setter = c.map_req(STRING_SET[c.game])
+    if variable is None or setter is None:
+        raise ValueError('no mapped string buffer')
+    move = c.T['moves'][c.newidx[c.kn[name]]]
+    rows = [dict(row) for row in TS.cancels(c.T, move['cancel'])]
+    captures = {}
+    for i, row in enumerate(rows):
+        if row['button'] == 0:
+            continue
+        req = TS.reqs(c.T, row['req'])
+        codes = [v for pid, v in req if pid == setter]
+        if codes:
+            captures[i] = codes[0]
+    made, consumed = {}, set()
+    for i, row in enumerate(rows):
+        req = TS.reqs(c.T, row['req'])
+        code = next((v for pid, v in req if pid == variable and v != 0), None)
+        if row['button'] or code is None:
+            continue
+        for capture, value in captures.items():
+            if value != code:
+                continue
+            rest = [(a, b) for a, b in req if a != variable]
+            rq = len(c.T['requirements'])
+            c.T['requirements'] += [dict(condition=a, param=b) for a, b in rest]
+            c.add('requirements', dict(condition=TS.TT_END, param=0))
+            inp = rows[capture]
+            made.setdefault(capture, []).append(dict(row, direction=inp['direction'], button=inp['button'], req=rq,
+                             win_start=inp['win_start'], win_end=inp['win_end']))
+            consumed.update((i, capture))
+    if not made:
+        raise ValueError('no buffered follow-ups in ' + name)
+    out = []
+    for i, row in enumerate(rows):
+        out.extend(made.get(i, ()))
+        if i not in consumed:
+            out.append(row)
+    move['cancel'] = TS.write(c.T, 'cancels', out)
+    c.stats['buffered string follow-ups made direct'] += sum(map(len, made.values()))
+
+
+def buffered_stance_transition(c, source, target):
+    """Candidate for a ground stance's late directional entry during an assist.
+
+    Accept held forward before its transition frame, keeping the animation start
+    and final input frame. Kazumi's working FLY uses mode 0x80 and the non-hit
+    hitlevel flag 0x200000. Apply that flag only to this opted-in empty-hit state;
+    do not copy FLY's airborne frames or alter the attack's active frames.
+    """
+    move = c.T['moves'][c.newidx[c.kn[source]]]
+    index = c.newidx[c.kn[target]]
+    state = c.T['moves'][index]
+    if state['first_active'] or state['last_active'] or state['hitlevel'] & 0xffff:
+        raise ValueError('stance continuation target is an attack: ' + target)
+    extra = c.extra_index.get(0x80)
+    if extra is None:
+        extra = c.add('cancel_extras', dict(value=0x80))
+        c.extra_index[0x80] = extra
+    rows = [dict(row) for row in TS.cancels(c.T, move['cancel'])]
+    matches = 0
+    for row in rows:
+        if row['move_id'] == index and row['direction'] == 64 and row['button'] == 0:
+            row['win_start'] = 1
+            row['extradata'] = extra
+            matches += 1
+    if matches != 1:
+        raise ValueError('no unique forward stance transition: ' + source)
+    state['hitlevel'] |= 0x200000
+    move['cancel'] = TS.write(c.T, 'cancels', rows)
+    c.stats['buffered stance continuation candidates'] += 1
+
+
+def normalize_buffered_strings(c):
+    """Convert only simple two-stage input buffers, across the imported roster.
+
+    A capture may only test that the buffer is empty and set one code. Every
+    capture must have a dispatch; complex captures and partial conversions are
+    left intact. These neutral-target capture cancels are not actual attacks,
+    but expose an extra cancel to TTT2's assist bookkeeping.
+    """
+    variable, setter = c.map_req(STRING_VAR[c.game]), c.map_req(STRING_SET[c.game])
+    if variable is None or setter is None:
+        return
+    for name, original in c.kn.items():
+        if original not in c.newidx:
+            continue
+        move = c.T['moves'][c.newidx[original]]
+        rows = TS.cancels(c.T, move['cancel'])
+        captures = []
+        safe = True
+        for row in rows:
+            req = TS.reqs(c.T, row['req'])
+            setters = [b for a, b in req if a == setter]
+            if not setters:
+                continue
+            if (not row['button'] or len(setters) != 1 or setters[0] == 0 or
+                    any((a, b) not in ((variable, 0), (setter, setters[0]), (0, 0)) for a, b in req)):
+                safe = False
+                break
+            captures.append(setters[0])
+        if not safe or not captures:
+            continue
+        dispatch = {b for row in rows if row['direction'] == 0 and row['button'] == 0
+                    for a, b in TS.reqs(c.T, row['req']) if a == variable and b != 0}
+        if not set(captures) <= dispatch:
+            continue
+        # A dispatch that also needs another latch set (Azucena's f,f,F+3,2: the hit at frames 15-16 sets latch 2,
+        # the 2 pressed from frame 1 dispatches at 16-19 on it) would test that latch at the press, before anything
+        # sets it: such a move keeps its buffer, which TTT2 plays as Tekken does
+        later = range(variable + 1, variable + LATCHES)
+        dispatches = [TS.reqs(c.T, row['req']) for row in rows if row['direction'] == 0 and row['button'] == 0]
+        if any(a in later and b != 0 for req in dispatches if any(x == variable and y != 0 for x, y in req)
+               for a, b in req):
+            c.stats['buffered strings kept: their dispatch waits for another latch'] += 1
+            continue
+        direct_buffered_string(c, name)
+
+
+def trim_startup(c, name, frames):
+    """Remove wind-up frames from a private animation and its event timeline."""
+    from ..ttt2 import animation as A
+    if type(frames) is not int or frames <= 0:
+        raise ValueError('startup trim must be a positive integer')
+    move = c.T['moves'][c.newidx[c.kn[name]]]
+    if not move['first_active'] or frames >= move['first_active']:
+        raise ValueError('startup trim reaches the attack: ' + name)
+    index = (move['anim'] & 0x3fff) - c.pack0_count
+    if not move['anim'] & 0x4000 or index < 0:
+        raise ValueError('startup trim requires a private imported animation: ' + name)
+    dec = A.decode(c.new_anims[index])
+    if frames >= dec['frames']:
+        raise ValueError('startup trim removes the whole animation: ' + name)
+    raw = A.to_raw(dec['descriptors'], dec['values'], dec['type'])
+    move['anim'] = 0x4000 | (c.pack0_count + len(c.new_anims))
+    c.new_anims.append(A.encode_raw(dec['descriptors'], raw[frames:]))
+    def shift(value):
+        return max(1, value - frames) if 0 < value < 32767 else value
+    for field in ('first_active', 'last_active', 'anim_len', 'airborne_start', 'airborne_end', 'ground_fall'):
+        move[field] = shift(move[field])
+    rows = [dict(r) for r in TS.cancels(c.T, move['cancel'])]
+    for row in rows:
+        for field in ('win_start', 'win_end', 'start_frame'):
+            row[field] = shift(row[field])
+    move['cancel'] = TS.write(c.T, 'cancels', rows)
+    if move['extraprops'] is not None:
+        props = []
+        for old in c.T['extra_move_properties'][move['extraprops']:]:
+            p = dict(old)
+            if p['frame']:
+                p['frame'] = (p['frame'] & 0xe000) | shift(p['frame'] & 0x1fff)
+            props.append(p)
+            if old['id'] == 0 and old['frame'] == 0:
+                break
+        move['extraprops'] = len(c.T['extra_move_properties'])
+        c.T['extra_move_properties'] += props
+    c.stats['move startup frames removed'] += frames
+
+
+def trim_recovery(c, name, frames):
+    """Return to neutral earlier, preserving startup, hits and launch reactions."""
+    if type(frames) is not int or frames <= 0:
+        raise ValueError('recovery trim must be a positive integer')
+    move = c.T['moves'][c.newidx[c.kn[name]]]
+    rows = [dict(row) for row in TS.cancels(c.T, move['cancel'])]
+    end = rows[-1]
+    if end['win_start'] - frames <= move['last_active']:
+        raise ValueError('recovery trim reaches the attack: ' + name)
+    end['win_start'] -= frames
+    end['start_frame'] = max(end['win_start'], end['start_frame'] - frames)
+    move['cancel'] = TS.write(c.T, 'cancels', rows)
+    c.stats['move recovery frames removed'] += frames
+
+
+def counterhit_reaction(c, name, reaction):
+    """Replace grounded CH move slots only; preserve every other reaction field.
+
+    Resolve an explicit T7 reaction without the alignment's approximate remap.
+    Lists are copied: other attacks may share their hit/reaction rows.
+    """
+    if reaction in c.dn:
+        target = c.dn[reaction]
+    else:
+        original = c.react_remap.pop(reaction, None)
+        c.alloc_ok += 1
+        try:
+            target = c.target(c.kn[reaction])
+        finally:
+            c.alloc_ok -= 1
+            if original is not None:
+                c.react_remap[reaction] = original
+        if target is None:
+            raise ValueError('cannot retain explicit CH reaction: ' + reaction)
+        c.link_queued({})
+    move = c.T['moves'][c.newidx[c.kn[name]]]
+    hits = [dict(h) for h in TS.hits(c.T, move['hit_condition'])]
+    changed = 0
+    for hit in hits:
+        if any(TS.has(c.T, hit['req'], condition) for condition in (TS.AIR, TS.BOUND, TS.BOUND_TAG)):
+            continue
+        row = dict(c.T['reactions'][hit['reactions']])
+        row.update(ch=target, crouch_ch=target)
+        hit['reactions'] = c.add('reactions', row)
+        changed += 1
+    if not changed:
+        raise ValueError('no grounded hit entry for CH override: ' + name)
+    move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
+    c.stats['explicit counter-hit reactions restored'] += changed
+
+
+def on_hit_followup(c, source, target):
+    """Restore an opted-in automatic on-hit continuation using its T7 timing.
+
+    Only the single unsupported [51, 0] contact check is accepted here. Other
+    requirements or player-input rows must not be silently made unconditional.
+    """
+    from . import idmaps as M
+    original = c.k.tables['moves'][c.kn[source]]
+    matches = [row for row in M.cancels(c.k, original['cancel'])
+               if TS.is_automatic(row) and c.k.resolve_alias(row['move_id']) == c.kn[target]
+               and M.reqs(c.k, row['req']) == [(51, 0)]]
+    if len(matches) != 1:
+        raise ValueError('no unique T7 on-hit continuation: ' + source)
+    move = c.T['moves'][c.newidx[c.kn[source]]]
+    index = c.newidx[c.kn[target]]
+    rows = [dict(row) for row in TS.cancels(c.T, move['cancel'])]
+    if any(row['move_id'] == index for row in rows[:-1]):
+        raise ValueError('on-hit continuation already present: ' + source)
+    req = TS.write(c.T, 'requirements', [dict(condition=47, param=0), dict(condition=TS.TT_END,param=0)])
+    row = dict(matches[0], move_id=index, req=req, extradata=c.extradata(matches[0]['extradata']))
+    rows.insert(len(rows)-1, row)
+    move['cancel'] = TS.write(c.T, 'cancels', rows)
+    c.stats['explicit on-hit continuations restored'] += 1
+
+
+def restore_hitgrab_followups(c, source):
+    """Restore only attack-to-throw + on-hit rows from an explicit move.
+
+    T7 editor requirements 2/51 are attack-to-throw/on-hit. Native 2 tests
+    attack-to-throw eligibility; 47 is the verified native contact predicate.
+    All other source requirements, facing, input and timing remain converted.
+    """
+    from . import idmaps as M
+    original=c.k.tables['moves'][c.kn[source]]
+    move=c.T['moves'][c.newidx[c.kn[source]]]
+    rows=[dict(row) for row in TS.cancels(c.T,move['cancel'])]
+    added=[]
+    for row in M.cancels(c.k,original['cancel']):
+        required=M.reqs(c.k,row['req'])
+        if (2,0) not in required or (51,0) not in required:
+            continue
+        target=c.k.resolve_alias(row['move_id'])
+        if target not in c.newidx:
+            raise ValueError('missing hit-grab target: ' + source)
+        req,ok=c.conv_reqs(row['req'],overrides={2:2,51:47})
+        if not ok:
+            raise ValueError('unmapped hit-grab gate: ' + source)
+        new=dict(row,req=req,move_id=c.newidx[target],extradata=c.extradata(row['extradata']))
+        if new not in rows:added.append(new)
+    if not added:
+        raise ValueError('no missing hit-grab continuations: ' + source)
+    move['cancel']=TS.write(c.T,'cancels',rows[:-1]+added+rows[-1:])
+    c.stats['scoped hit-grab continuations restored'] += len(added)
+
+
+def air_hit_string(c, source):
+    """Keep the source input and airborne-hit latches in two native words."""
+    from . import idmaps as M, specialcancels as S
+    source_rows = M.cancels(c.k, c.k.tables['moves'][c.kn[source]]['cancel'])
+    capture = [r for r in source_rows if r['button'] and M.reqs(c.k,r['req']) == [(0x80a9,1)]]
+    hit = [r for r in source_rows if M.reqs(c.k,r['req']) == [(44,0),(607,0),(0x80a6,1)]]
+    follow = [r for r in source_rows if M.reqs(c.k,r['req']) == [(352,1),(353,1)]]
+    if len(capture) != 1 or len(hit) != 1 or len(follow) != 1:
+        raise ValueError('not a supported airborne hit string: ' + source)
+    target = c.k.resolve_alias(follow[0]['move_id'])
+    if target not in c.newidx or c.map_req(44) is None or c.map_req(607) is None:
+        raise ValueError('missing airborne string target or gate: ' + source)
+    def req(values):
+        return TS.write(c.T,'requirements',[dict(condition=a,param=b) for a,b in values]
+                        + [dict(condition=TS.TT_END,param=0)])
+    def extra(value):
+        if value not in c.extra_index:
+            c.extra_index[value] = c.add('cancel_extras',dict(value=value))
+        return c.extra_index[value]
+    move = c.T['moves'][c.newidx[c.kn[source]]]
+    rows = [dict(r) for r in TS.cancels(c.T,move['cancel'])]
+    def buffer_row(row):
+        return any(all(row[f] == src[f] for f in
+                   ('direction','button','win_start','win_end','start_frame'))
+                   for src in (capture[0],hit[0],follow[0]))
+    rows = [row for row in rows if not buffer_row(row)]
+    # 0x2800 evaluates actions without changing the move; 0x182 is a
+    # real buffered follow-up. Both are verified native cancel modes.
+    # Player trace: damage connects at frame 11 with native 46 true and
+    # 47 false. Latch the source 44's mapped predicate, not a guessed 47.
+    latches = [dict(capture[0],req=req([(S.SPECIAL_SET,1)]),
+                    extradata=extra(0x2800),move_id=0x8001,option=0),
+               dict(hit[0],req=req([(c.map_req(44),0),(c.map_req(607),0),(S.CONTACT_SET,1)]),
+                    extradata=extra(0x2800),move_id=0x8001,option=0)]
+    dispatch = dict(follow[0],req=req([(S.SPECIAL_VAR,1),(S.CONTACT_VAR,1)]),
+                    extradata=extra(0x182),move_id=c.newidx[target],option=0)
+    move['cancel'] = TS.write(c.T,'cancels',latches + [dispatch] + rows)
+    entry = []
+    if move.get('begin_props') is not None:
+        for prop in c.T['move_begin_props'][move['begin_props']:]:
+            if prop['id'] == TS.TT_END:break
+            entry.append(dict(prop))
+    empty = req([])
+    move['begin_props'] = TS.write(c.T,'move_begin_props',
+        [dict(req=empty,id=S.SPECIAL_SET,value=0),dict(req=empty,id=S.CONTACT_SET,value=0)]
+        + entry + [dict(req=empty,id=TS.TT_END,value=0)])
+    c.stats['airborne hit string continuations restored'] += 1
+
+
+def restore_air_reaction(c, source):
+    """Keep an explicit move's original airborne reaction, never a global remap.
+
+    Copy its hit list and reaction row so other attacks sharing either list
+    retain their native mapping and Tag Assault behavior.
+    """
+    from . import idmaps as M
+    original = c.k.tables['moves'][c.kn[source]]
+    matches = [ri for req, _, ri in M.hitconds(c.k, original['hit_condition']) if req == [(614, 0)]]
+    if len(matches) != 1:
+        raise ValueError('no unique airborne reaction: ' + source)
+    ri = matches[0]
+    from ..movesets import REACTION_MOVE_FIELDS
+    names = {c.k.move_name(c.k.tables['reactions'][ri][f]) for f in REACTION_MOVE_FIELDS
+             if c.k.tables['reactions'][ri][f] < len(c.k.tables['moves'])}
+    saved = {name: c.react_remap.pop(name) for name in names if name in c.react_remap}
+    key = ('react', ri)
+    cached = c.cache.pop(key, None)
+    try:
+        reaction = c.conv_reaction(ri)
+    finally:
+        c.react_remap.update(saved)
+        c.cache.pop(key, None)
+        if cached is not None:
+            c.cache[key] = cached
+    c.link_queued({})
+    move = c.T['moves'][c.newidx[c.kn[source]]]
+    hits = [dict(h) for h in TS.hits(c.T, move['hit_condition'])]
+    air = [h for h in hits if TS.reqs(c.T, h['req']) == [(TS.AIR, 0)]]
+    if len(air) != 1:
+        raise ValueError('no unique native airborne hit: ' + source)
+    air[0]['reactions'] = reaction
+    move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
+    c.stats['explicit airborne reactions restored'] += 1
+
+
+def free_air_screw(c, source):
+    """An explicit source airborne Screw, with private non-Bound victim states."""
+    from . import idmaps as M
+    from ..movesets import REACTION_MOVE_FIELDS
+    original = c.k.tables['moves'][c.kn[source]]
+    matches = [(damage,ri) for req,damage,ri in M.hitconds(c.k,original['hit_condition']) if req == [(615,0)]]
+    if len(matches) != 1:
+        raise ValueError('no unique T7 airborne Screw: ' + source)
+    damage,ri = matches[0]
+    key = ('react',ri)
+    cached = c.cache.pop(key,None)
+    names = {c.k.move_name(c.k.tables['reactions'][ri][f]) for f in REACTION_MOVE_FIELDS
+             if c.k.tables['reactions'][ri][f] < len(c.k.tables['moves'])}
+    saved = {n:c.react_remap.pop(n) for n in names if n in c.react_remap}
+    try:
+        reaction = dict(c.T['reactions'][c.conv_reaction(ri)])
+    finally:
+        c.react_remap.update(saved)
+        c.cache.pop(key,None)
+        if cached is not None:c.cache[key] = cached
+    c.link_queued({})
+    clones = {}
+    for field in REACTION_MOVE_FIELDS:
+        mid = reaction[field]
+        name = c.move_name(mid) if mid < len(c.T['moves']) else ''
+        if name not in ('sDw_AIR_SPINL','sDw_AIR_SPINR'):continue
+        if mid not in clones:
+            row = dict(c.T['moves'][mid],name=c.string(name + '_NB'))
+            props = [dict(p) for p in TS.props(c.T,row['extraprops']) if p['id'] != 0x8193]
+            props.append(dict(frame=0,id=0,value=0))
+            row['extraprops'] = TS.write(c.T,'extra_move_properties',props)
+            clones[mid] = c.add('moves',row)
+        reaction[field] = clones[mid]
+    if len(clones) != 2:
+        raise ValueError('source airborne Screw states were not retained: ' + source)
+    rx = c.add('reactions',reaction)
+    req = TS.write(c.T,'requirements',[dict(condition=TS.AIR,param=0),dict(condition=TS.TT_END,param=0)])
+    move = c.T['moves'][c.newidx[c.kn[source]]]
+    hits = [dict(h) for h in TS.hits(c.T,move['hit_condition'])
+            if not any(TS.has(c.T,h['req'],k) for k in (TS.BOUND,TS.BOUND_TAG,TS.AIR))]
+    move['hit_condition'] = TS.write(c.T,'hit_conditions',[dict(req=req,damage=damage,reactions=rx)] + hits)
+    c.stats['airborne Screws preserving Bound'] += 1
+
+
+def downed_reaction(c, name, reaction):
+    """Change only the downed opponent slot, copying shared reaction rows first."""
+    move = c.T['moves'][c.newidx[c.kn[name]]]
+    target = c.dn[reaction]
+    hits = []
+    for hit in TS.hits(c.T, move['hit_condition']):
+        hit = dict(hit)
+        if not any(TS.has(c.T, hit['req'], req) for req in (TS.AIR, TS.BOUND, TS.BOUND_TAG)):
+            row = dict(c.T['reactions'][hit['reactions']], downed=target)
+            hit['reactions'] = c.add('reactions', row)
+        hits.append(hit)
+    move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
+# the command list's bound marks (command_bounds): the standing alias the walk starts from; a cancel row's press
+# bits (1 2 4 8 the buttons, 0x100 tag; 9-17 are held ones) and its "any of them" flag; requirement 0 = always
+STANDING, PRESS_BITS, ANY_OF, ALWAYS = 0x8001, 0x1FF, 0x20000000, 0
+
+
+def command_bounds(c):
+    """The moves MOVESET['bounds'] makes bounds (or not) for the command list (its bound icon): a function of a
+    command's presses [(stick, buttons, frame)] (a cancel row's direction and press bits, the demo frame of the
+    press) -> {press number from 1: bound} for the presses that reach such a move; None when the definition names
+    none. The presses walk the converted moveset from standing: each takes the first input row of the current move
+    (its groups inline) whose direction, buttons and window fit it and whose requirements always hold; a press no
+    row takes ends the walk."""
+    named = c.defn.MOVESET.get('bounds', {})
+    if not named:
+        return None
+    from . import idmaps as M
+    T = c.T
+
+    def rows(i):
+        for r in TS.cancels(T, T['moves'][i]['cancel']):
+            if r['direction'] == M.GROUP:
+                yield from TS.chain(T['group_cancels'], r['move_id'], lambda g: g['direction'] == M.GROUP_END)
+            else:
+                yield r
+
+    def takes(r, stick, buttons, frame):
+        bits = r['button'] & PRESS_BITS
+        return bool(bits and r['direction'] < M.LIST_END and (not r['direction'] or r['direction'] & stick)
+                    and (bits & buttons if r['button'] & ANY_OF else bits == buttons)
+                    and r['win_start'] <= frame <= r['win_end']
+                    and all(cond == ALWAYS for cond, _ in TS.reqs(T, r['req'])))
+
+    def marks(presses):
+        marked = {c.newidx[c.kn[name]]: bound for name, bound in named.items()}     # (resolved when walked)
+        out, move, start = {}, TS.resolve(c.aliases, STANDING), None
+        for n, (stick, buttons, frame) in enumerate(presses, 1):
+            at = 1 if start is None else frame - start + 1
+            row = next((r for r in rows(move) if takes(r, stick, buttons, at)), None)
+            if row is None:
+                break
+            move, start = TS.resolve(c.aliases, row['move_id']), frame
+            if move in marked:
+                out[n] = marked[move]
+        return out
+    return marks
+
+
+def set_bound(c, name, bound):
+    """Change one move using private hit lists; leave unrelated conversion steps alone."""
+    move = c.T['moves'][c.newidx[c.kn[name]]]
+    hits = [dict(h) for h in TS.hits(c.T, move['hit_condition'])]
+    if bound:
+        # One bound per juggle; preserve all ground and post-bound reactions.
+        hits = [h for h in hits if not TS.has(c.T, h['req'], TS.BOUND)]
+        damage = next((h['damage'] for h in hits if TS.has(c.T, h['req'], TS.AIR)), hits[-1]['damage'])
+        hits.insert(0, dict(req=c.bound_req, damage=damage, reactions=c.bound_reaction))
+    else:
+        hits = [h for h in hits if not TS.has(c.T, h['req'], TS.BOUND)]
+        for h in hits:
+            if TS.has(c.T, h['req'], TS.AIR) and TS.same_reaction(c.T, h['reactions'], c.bound_reaction):
+                h['reactions'] = c.after_bound_reaction
+    move['hit_condition'] = TS.write(c.T, 'hit_conditions', hits)
+    c.stats['explicit bound enabled' if bound else 'explicit bound removed'] += 1

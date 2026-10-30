@@ -1,4 +1,4 @@
-"""Tekken 7 skin -> TTT2 skin: a colour gain measured on the fighters both games have.
+"""Tekken 7 (or Tekken 8) skin -> TTT2 skin: a colour gain measured on the fighters both games have.
 
 TTT2 draws a skin texture's colours much as they are; Tekken 7's skin shader (subsurface scattering, its lighting and
 tone mapping) brightens and desaturates its own skin textures, which are darker and more orange: baked as they are,
@@ -20,6 +20,8 @@ SHARED = {'female': ['ann', 'ask', 'jul', 'leo', 'lil', 'nin', 'xia', 'zaf'],
           'male': ['bob', 'bry', 'dra', 'edd', 'fen', 'gan', 'hei', 'hwo', 'jin', 'kaz', 'lar', 'law', 'lee', 'lei',
                    'mar', 'mig', 'pau', 'ste']}
 FACE_MATERIAL = '/Game/Character/Common/shader/MaterialInstance/skin/%s/MI_CH_%s_skin_face'
+# TTT2's women (a Tekken 8 fighter's skin is measured on the faces of TTT2 fighters Tekken 8 has, of its sex)
+WOMEN = ('ali', 'ang', 'ann', 'ask', 'chr', 'jc', 'jul', 'jun', 'knm', 'leo', 'lil', 'mic', 'mih', 'nin', 'xia', 'zaf')
 FACE_MESH = 'cha:kao_O_OBJ'         # TTT2's face mesh; its polygon with the most vertices is the skin
 FEWEST = 3                          # pairs needed for a gain (else none: 1, 1, 1)
 NEAREST = 5                         # the fighters whose faces are nearest in brightness give the gain
@@ -48,18 +50,27 @@ def ttt2_face(archives, code):
     return _srgb_to_linear(rgb).reshape(-1, 3).mean(0)
 
 
-def gain(paks, archives, sex, materials, bake, own=None, log=None):
-    """The per-channel gain for the skin of a fighter of `sex` whose Tekken 7 face's mean linear colour is `own`
-    (None: the median over all of them). materials: tekken7.material.Materials; bake: model.bake_albedo with its
-    textures, (effective material) -> (linear rgb, alpha). -> (gain, their face colour: the hue hue() keeps skin
-    near)."""
+def tekken7_faces(paks, sex):
+    """[(TTT2 code, Tekken 7 face material path)] of the fighters both games have, of that sex, whose face material
+    the paks have."""
+    paths = [(code, FACE_MATERIAL % (code, code)) for code in SHARED.get(sex, SHARED['female'])]
+    return [(code, path) for code, path in paths if paks.find(path)]
+
+
+def gain(source, archives, sex, materials, bake, own=None, log=None):
+    """The per-channel gain for the skin of a fighter of `sex` whose face's mean linear colour (baked from its game)
+    is `own` (None: the median over all of them). source: the fighter's (source.py: skin_faces(sex), the faces of
+    fighters both games have; Tekken 7's paks as such too); materials: its game's Materials; bake: its bake_albedo
+    with its textures, (effective material) -> (linear rgb, alpha). -> (gain, their face colour: the hue hue() keeps
+    skin near)."""
     ratios, lumas, faces = [], [], []
-    for code in SHARED.get(sex, SHARED['female']):
-        path = FACE_MATERIAL % (code, code)
-        if not paks.find(path):
-            continue
+    if hasattr(source, 'skin_faces'):
+        found, none = source.skin_faces(sex), source.NO_COLOURS
+    else:
+        found, none = tekken7_faces(source, sex), {}
+    for code, path in found:
         try:
-            rgb, _ = bake(materials.effective(path, {}))
+            rgb, _ = bake(materials.effective(path, none))
             theirs = ttt2_face(archives, code)
         except (KeyError, ValueError):
             continue
@@ -84,6 +95,22 @@ def gain(paks, archives, sex, materials, bake, own=None, log=None):
         log('  skin: colour gain %.2f %.2f %.2f (from the %d fighters both games have %s)' % (
             g[0], g[1], g[2], len(ratios), 'nearest in brightness' if own is not None else 'of that sex'))
     return g, target
+
+
+def gained(rgb, g):
+    """A skin texture (linear rgb) times the gain. The gain turns Tekken 7's orange skin into TTT2's paler, pinker
+    skin, lifting blue most (Lidia 1.48, 2.00, 2.47): texels of other colours (the mauve painted on Lidia's lids,
+    shown when they close; grey stubble) turned blue with it. So a texel takes the gain as far as it is coloured like
+    skin (its red over blue against the texture's mean), the rest a grey gain lifting it as much as the skin's
+    brightness."""
+    g = np.asarray(g, np.float64)
+    mean = rgb.reshape(-1, 3).mean(0).astype(np.float64)
+    k = float((mean * g) @ LUMA / max(float(mean @ LUMA), 1e-6))
+
+    def warmth(c):
+        return (c[..., 0] - c[..., 2]) / np.maximum(c.sum(-1), 1e-6)
+    w = np.clip(warmth(rgb) / max(float(warmth(mean)), 1e-3), 0, 1)[..., None]
+    return np.clip(rgb * (k + w * (g - k)).astype(rgb.dtype), 0, 1)
 
 
 def hue(rgb, target):

@@ -11,6 +11,17 @@ TEKKEN7_CODE = 'nsc'
 CODE = 'nsc'
 SEX = 'male'
 
+# Ordered entries for the in-game preset chooser (asset names, never game data).
+PRESETS = (
+    ('DefaultCos1P', 'Default'),
+    ('DefaultCos2P', 'Default 2P'),
+    ('1P_c1', 'Default alternate'),
+    ('Champ', 'Champion'),
+    ('Champ_silver', 'Champion silver'),
+    ('trad_royal', 'Royal'),
+    ('trad_royal_c1', 'Royal alternate'),
+)
+
 DONOR = 'lar'                 # Lars Alexandersson: a slim male skeleton
 DONOR_ROW = 38
 
@@ -61,10 +72,39 @@ ART = {
 
 VOICE_PREFIX = 'nc'
 
+# Invisible collision points extend attacks downwards without changing their
+# visible animations. Bind-pose offsets are calibrated against active-frame
+# rotations: approximately 200 mm, 220 mm and 550 mm lower at impact.
+WEAPONS = [
+    {'bone': 'L_Hand', 'parent': 'TE_L_jnt', 'pair': None,
+     'points': {0xfe: {'world_offset': (-120, -154, -45)}}},
+    {'bone': 'R_Foot', 'parent': 'ASHI_R_jnt', 'pair': None,
+     'points': {0xfd: {'world_offset': (-43, 7, 219)}}},
+    {'bone': 'R_Hand', 'parent': 'TE_R_jnt', 'pair': None,
+     'points': {0xfc: {'world_offset': (338, 343, -291)}}},
+]
+
 # the id maps: Heihachi in both games, and his generic moves against TTT2's (Heihachi, the donor, Asuka)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 MOVESET = {
+    'direct_buffered_strings': ('Nc_6lk',),
+    'tag_combos': {'Nc_66rklkrp': 'air'},
+    'hitboxes': {
+        'Nc_lp00B': (0xfe, 0, 0xfe, 11),        # b+1
+        'Nc_lprplprk': (0xfd, 0, 0xfd, 15),    # 1,2,1,4: final kick
+        'Nc_66WP': (0xfc, 0, 0xfc, 9),         # f,f+1+2: grounded reach
+    },
+    # Devil Jin b+4's native grounded flip, leaving standing/air hits alone.
+    'downed_reactions': {'Nc_66WP': 'dDwrOUC00_'},
+    'air_reactions': {'Nc_lp00B': 'J8_jprk00',
+                      'Nc_66rklkrp': (23, 'Jn_mc03s')},
+    'air_reaction_reference': 40,  # Jinpachi u+4, airborne reaction
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds; d/f+1,4's second hit none
+    'bounds': {**dict.fromkeys(('Nc_2lp', 'Nc_2lrk', 'Nc_3rklklk', 'Nc_3rplp', 'Nc_66rklp', 'Nc_WK00F',
+                                'Nc_jplp00F'), True), 'Nc_3lprk': False},
     'name': '[FAHKUMRAM]',
+    # Preserve Fahk's running 3 (ncss_mach) and d+4 (ncss_2rk), despite generic names.
+    'own_moves': r'^(Co_runlk00|Co_t_srk00)$',
     'drop_moves': r'^Nc_Direct$',
     'direct': [(r'^(la|mk)_s', 'anim', ['nc_s%02d' % k for k in range(4)]),     # the donor's intros -> his
                (r'^la_w', 'anim', ['nc_w%02d' % k for k in range(3)])],         # win poses

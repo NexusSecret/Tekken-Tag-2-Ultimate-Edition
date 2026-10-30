@@ -15,7 +15,8 @@ voice list (the title's table by select id: entries {sound id, mask}; the sound 
 se_Chr's tones are filled by that list, not by their names: shout n gets the Tekken 7 fighter's shout n (Tekken 7
 numbers them alike: `atk` short, medium, long, then `org`), the damage voices (0x40, numbered from the list's end)
 and KO screams (0x80) its clips of those kinds. Shouts past the donor's count become tones appended to se_Chr, which the
-port adds to the fighter's voice list (character.ini `voice_extra`).
+port adds to the fighter's voice list (character.ini `voice_extra`). voice_values gives each clip's number in these
+banks (Tekken 8's moves name the line they say instead, tekken8/voice.py: the converter plays it by that number).
 
 The select screen's announcer calls are tones of one shared bank, se_Slt_StartChar: a link tone
 `sel_syvo_name_<code>` per fighter plays its audio tones `lnk_sel_syvo_name_<code>[_Copy]`. name_call() appends the
@@ -44,11 +45,13 @@ def project_id(which, slot):
 # sample rates tried in turn: the first that keeps a bank no bigger than the donor's (the title's sound memory is
 # sized for its own banks)
 RATES = (48000, 32000, 24000)
+EFFECT_RATE = 32000             # the sound effects' (append_effects)
 # The title's tables (code/Tekken.rpx): fighters' codes, voice lists and the sound table
 CODES = 0x107C57F4              # 63 x char*: each fighter's code, by select id
 VOICE_LISTS = 0x107D44EC        # 63 x {entries*, count, fighter}; an entry 16 B {0, sound id, 0x4000 | k, u16 mask, 0}
 SOUND_TABLE = 0x107D4AC0        # by sound id {tone, bank id, group, flags}
 KIAI, DAMAGE, KO = 0x20, 0x40, 0x80
+SHOUT_VOICE, DAMAGE_VOICE = 2, 3        # a move's voice value: type << 24 | n (shout n, damage voice n)
 
 
 def tone_kind(name):
@@ -171,12 +174,15 @@ def _audio(original, clip, channels, to, side=None):
     return wave(list(a), to), to, channels, a.shape[1]
 
 
-def build(clips, donor_banks, code, vlist, slot):
+def build(clips, donor_banks, code, vlist, slot, effects=()):
     """donor_banks: {'se_Chr': bytes, 'se_Dwi': bytes, 'rm_Dst': bytes, 'rm_Dwi': bytes}; vlist: the donor's voice
-    list (voice_list); slot: the fighter's number (its banks' project ids) -> ({file name: bytes}, report lines, win quotes {Tekken 7 event name: the se_Dwi tone that
-    plays it (moves play win quotes by tone)}, the shouts' tones appended to se_Chr (its voice list's extra entries:
-    shouts number len(donor's shouts) on)). se_Chr follows the voice list; the other banks take clips in turn from
-    one round of each kind (rm_Dwi gets a win quote se_Dwi has not)."""
+    list (voice_list); slot: the fighter's number (its banks' project ids); effects: sound effects (clips, as
+    clips') its moves play as item sounds (convert/sounds.py) -> ({file name: bytes}, report lines, win quotes {Tekken 7
+    event name: the se_Dwi tone that plays it (moves play win quotes by tone)}, the shouts' tones appended to se_Chr
+    (its voice list's extra entries: shouts number len(donor's shouts) on), the effects' tones appended to se_Chr
+    after them (append_effects)).
+    se_Chr follows the voice list; the other banks take clips in turn from one round of each kind (rm_Dwi gets a win
+    quote se_Dwi has not)."""
     out, report, wins, extra = {}, [], {}, []
     counter = {}
     for which, data in donor_banks.items():
@@ -196,16 +202,58 @@ def build(clips, donor_banks, code, vlist, slot):
         report.append('%s_%s: %d tones of its own%s, %d Hz, %d KB (the donor\'s %d KB)'
                       % (which, code, len(used), ' (%d shouts appended)' % len(extra_here) if extra_here else '',
                          rate, len(written) // 1024, len(data) // 1024))
-    return out, report, wins, extra
+    effect_tones = []
+    if effects:
+        bank = Bank(out['se_Chr_%s.nus3bank' % code])
+        effect_tones = append_effects(bank, effects)
+        out['se_Chr_%s.nus3bank' % code] = bank.write()
+        report.append('se_Chr_%s: %d sound effects appended (%d Hz), %d KB' % (
+            code, len(effects), EFFECT_RATE, len(out['se_Chr_%s.nus3bank' % code]) // 1024))
+    return out, report, wins, extra, effect_tones
+
+
+def append_effects(bank, clips):
+    """Appends the fighter's sound effects (convert/sounds.py: its moves play them as item sounds) to its se_Chr
+    bank, each a copy of the donor's item sound tone (itm_lar_03; else of a tone with audio) -> their tones."""
+    t = next((i for i in range(len(bank.tones)) if (bank.name(i) or '').startswith('itm_') and bank.has_audio(i)),
+             None)
+    if t is None:
+        t = next(i for i in range(len(bank.tones)) if bank.name(i) and bank.has_audio(i))
+    old, audio = bank.name(t), bank.audio[t]
+    _, channels, _ = bank.format(t)
+    tones = []
+    for j, clip in enumerate(clips):
+        i = bank.append(bank.renamed(t, old[:-2] + '%02X' % (0xA0 + j)), audio=audio)
+        a, rate, ch, n = _audio(audio, clip, channels, EFFECT_RATE)
+        bank.replace(i, a, rate, ch, n)
+        tones.append(i)
+    return tones
+
+
+def voice_values(clips, vlist):
+    """{clip name: the voice value a move plays it with} in the se_Chr build() makes on the donor's voice list
+    vlist: shout n (SHOUT_VOICE << 24 | n) is clips.kiai()'s n-th (the donor's shouts, then the ones appended), damage
+    voice n (DAMAGE_VOICE << 24 | n) the clip build() gives the n-th category-6 entry from the list's end; a clip on
+    several, its first."""
+    out = {}
+    for n, clip in enumerate(clips.kiai()):
+        out.setdefault(clip[0], SHOUT_VOICE << 24 | n)
+    hurt, slots = clips.damage('sml'), [tone for mask, tone in vlist if mask & DAMAGE and not mask & KIAI]
+    for n in range(len(slots) if hurt else 0):
+        out.setdefault(hurt[(len(hurt) - 1 - n) % len(hurt)][0], DAMAGE_VOICE << 24 | n)
+    return out
 
 
 def _build_one(which, data, clips, code, to, counter, vlist=None, slot=0):
     """The donor's bank `which` with the clips at sample rate `to` -> (bytes, the tones replaced, {clip name: the
     tone that plays it}, the shouts' tones appended). A link tone's tones (a stereo pair `..R`/`..L`, or variants)
     get one clip together. counter: how many clips of each kind earlier banks took (advanced here). vlist: the
-    donor's voice list (se_Chr): its tones first, by the list."""
+    donor's voice list (se_Chr): its tones first, by the list. With clips whose STORED_ONCE is true (Tekken 8's),
+    tones given the same audio (a clip on several tones, a mono line on both tones of a stereo pair) share one copy
+    of it, as the title's own banks share audio (nus3bank.Bank.source)."""
     bank = Bank(data)
     used, placed, extra = [], {}, []
+    stored = {} if getattr(clips, 'STORED_ONCE', False) else None     # audio -> the first tone holding it
 
     def kind_of(name):
         if which == 'se_Chr':
@@ -216,6 +264,10 @@ def _build_one(which, data, clips, code, to, counter, vlist=None, slot=0):
         _, channels, _ = bank.format(i)
         audio, rate, ch, n = _audio(bank.audio[i], clip, channels, to, side)
         bank.replace(i, audio, rate, ch, n)
+        if stored is not None:
+            first = stored.setdefault(audio, i)
+            if first != i:
+                bank.source[i] = bank.source[first]
         used.append('%s<-%s' % (bank.name(i), clip[0]))
 
     done = set()

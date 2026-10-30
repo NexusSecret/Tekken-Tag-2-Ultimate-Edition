@@ -18,6 +18,7 @@
 #include "cafe/guest.h"
 #include "cafe/runtime.h"
 
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -97,7 +98,7 @@ struct ConvertDepthArgs { gx2::DepthBuffer src; gx2::Surface dst; uint32_t level
 struct CopyToScanArgs { gx2::ColorBuffer buffer; uint32_t target; };
 
 struct FrameLog {
-    bool enabled = false;  // the backend interpolates
+    bool enabled = false;  // the backend replays frames (interpolation, a view from another camera)
     bool complete = false; // started at a swap
     std::unique_ptr<Registers> start;
     std::vector<LogEvent> events;
@@ -445,9 +446,12 @@ void execute_packet(uint32_t opcode, uint32_t payload, uint32_t count, uint32_t 
             if (g_log.complete && g_backend->want_replays()) {
                 for (uint32_t n = 1; n < g_backend->frames_per_frame(); ++n) replay_frame(n);
             }
+            if (g_log.complete && g_backend->want_view_replay()) replay_frame(0);
             g_backend->frame_shown();
-            start_frame_log();
         }
+        g_log.enabled = g_backend->logs_frames();
+        if (g_log.enabled) start_frame_log();
+        else g_log.complete = false;
         retire_later({Retirement::kFrame, g_backend->flush(), 0, 0});
         break;
     case pm4::kHleCopyColorToScan:
@@ -544,13 +548,20 @@ void retire(uint64_t timestamp) {
     os::wake(os::kWaitGpu);
 }
 
+// Time the command processor waited for commands (its thread's).
+std::chrono::steady_clock::duration g_idle{};
+
 void command_processor_main() {
     pthread_setname_np(pthread_self(), "gpu");
     for (;;) {
         Submission s;
         {
             std::unique_lock lock(g_queue_mutex);
-            g_queue_cv.wait(lock, [] { return !g_queue.empty(); });
+            if (g_queue.empty()) {
+                const auto begin = std::chrono::steady_clock::now();
+                g_queue_cv.wait(lock, [] { return !g_queue.empty(); });
+                g_idle += std::chrono::steady_clock::now() - begin;
+            }
             s = g_queue.front();
             g_queue.pop_front();
         }
@@ -584,6 +595,12 @@ void start() {
         std::thread(retirement_main).detach();
         start_display();
     });
+}
+
+double take_idle_seconds() {
+    const double seconds = std::chrono::duration<double>(g_idle).count();
+    g_idle = {};
+    return seconds;
 }
 
 uint64_t submit(uint32_t buffer, uint32_t words) {

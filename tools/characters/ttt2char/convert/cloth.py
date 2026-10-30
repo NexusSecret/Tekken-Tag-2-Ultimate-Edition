@@ -28,6 +28,10 @@ layout below). So for each clothing asset whose vertices may move at least FREE_
   legs), pairs (every bone but a chain's top below the chest with the hips and legs, kicks reach anywhere, and with
   the belly or chest when near; none for chains hung from an arm), each capsule as thick as reaches the nearest of
   its cloth bones at rest (TOUCH), and links between neighbouring chains (Lars's values).
+Tekken 8's cloth (tekken8/cloth.py: what its Catwalk Cloth lets swing, from the particles' max distances: Reina's
+jacket below her chest, its cords, Azucena's sleeves' fringes) comes in as such cloths too, strands with their own
+link length, shortest chain, how they hang and, hung from an arm, their own spring entries ('spring'), all hung from
+body joints ('body_parent').
 
 The spring file (big-endian), as the game's files have it (1572 of its 1607 spring files read this way to the byte):
     f32 5.0, 28 zero bytes | u32 entry count, 12 zero bytes | entries of 0x60 bytes: u32 OPT number, 11 f32
@@ -238,6 +242,14 @@ def _anatomical(k, b):
     return b
 
 
+def _body(k, b):
+    """The nearest of bone b and its ancestors that is no swinging bone (one TTT2 gives a spring: a bust)."""
+    names, parents = k['bones']['names'], k['bones']['parents']
+    while parents[b] >= 0 and (skeleton.t7_weight_target(names[b], None) or '').startswith('OPT'):
+        b = parents[b]
+    return b
+
+
 def _frame(x, outward):
     x = x / max(np.linalg.norm(x), 1e-9)
     y = outward - x * float(outward @ x)
@@ -247,13 +259,14 @@ def _frame(x, outward):
     return np.stack([x, y, np.cross(x, y)], 1)
 
 
-def _drape(nodes, body, normals):
-    """Link directions for the chain through nodes if it was modelled flowing (tilted more than FLOWING from
+def _drape(nodes, body, normals, flowing=FLOWING, down=None):
+    """Link directions for the chain through nodes if it was modelled flowing (tilted more than `flowing` from
     straight down, root to tip): HANG from straight down toward where it flowed, the bones kept MARGIN outside the
-    body (points, outward normals). None for a chain modelled hanging."""
-    down = np.array([0.0, -1.0, 0.0])
+    body (points, outward normals). None for a chain modelled hanging. down: another way to hang (a unit vector:
+    along an arm, for a Tekken 8 strand hung from one)."""
+    down = np.array([0.0, -1.0, 0.0]) if down is None else np.asarray(down, np.float64)
     whole = nodes[-1] - nodes[0]
-    if float(np.arccos(np.clip(whole @ down / max(np.linalg.norm(whole), 1e-9), -1, 1))) <= FLOWING:
+    if float(np.arccos(np.clip(whole @ down / max(np.linalg.norm(whole), 1e-9), -1, 1))) <= flowing:
         return None
     side = whole - down * float(whole @ down)
     side = side / np.linalg.norm(side) if np.linalg.norm(side) > 1e-6 else np.array([0.0, 0.0, -1.0])
@@ -277,8 +290,11 @@ def _drape(nodes, body, normals):
 
 def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
     """Adds the cloth's chains to k: bones `cloth<c>_<chain>_<link>` after its Tekken 7 bones (bind frames in TTT2
-    space), the drawn vertices skinned to them, the chains draped. -> [{'part', 'bones' (k bone indices),
-    'neighbours' (chain numbers)}] in chain number order."""
+    space), the drawn vertices skinned to them, the chains draped. A cloth's own 'link' and 'reach' (mm), 'flowing'
+    and 'down' (_drape's; Tekken 8's strands: tekken8/cloth.py) stand for LINK, REACH, FLOWING and straight down
+    (`link` scales its link as it scales LINK); its 'body_parent' hangs its chains from body joints only (_body:
+    Reina's jacket is skinned to her busts where it starts to swing), its 'spring' goes with its chains (springs()).
+    -> [{'part', 'bones' (k bone indices), 'neighbours' (chain numbers)}] in chain number order."""
     s0 = k['prims'][0]
     pos, nrm, joints, weights = s0['pos'], s0['nrm'], s0['joints'], s0['weights']
     names, parents = list(k['bones']['names']), list(k['bones']['parents'])
@@ -292,6 +308,8 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
     out, drapes = [], []
     for ci, c in enumerate(cloths):
         a = c['asset']
+        shortest = c.get('reach', REACH)
+        step = link * c['link'] / LINK if 'link' in c else link
         sim = _points(a.vertices)
         n = len(sim)
         pinned = a.max_distance <= PINNED
@@ -309,7 +327,7 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
             ri, rd = _nearest(sim[source], sim[roots])
             chain = np.where(free & (rd <= 1.5 * spacing), ri, -1)
             reach = np.array([g[chain == r].max() if (chain == r).any() else 0.0 for r in range(len(roots))])
-            keep = reach >= REACH
+            keep = reach >= shortest
             if keep.all() or not keep.any():
                 break
             roots = roots[keep]
@@ -323,14 +341,14 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
         made = []
         for r, members in enumerate(chains):
             reach = float(g[members].max()) if len(members) else 0.0
-            if reach < REACH:
+            if reach < shortest:
                 made.append(None)
                 continue
-            levels = list(np.arange(0.0, reach - link / 3, link)[1:]) + [reach]
+            levels = list(np.arange(0.0, reach - step / 3, step)[1:]) + [reach]
             nodes = [sim[source[members]].mean(0)]
             for j, lv in enumerate(levels):
-                lo = lv - link / 2 if j + 1 < len(levels) else lv - link / 3
-                band = members[(g[members] >= lo) & (g[members] <= lv + link / 2)]
+                lo = lv - step / 2 if j + 1 < len(levels) else lv - step / 3
+                band = members[(g[members] >= lo) & (g[members] <= lv + step / 2)]
                 if not len(band):
                     break
                 nodes.append(sim[band].mean(0))
@@ -345,6 +363,8 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
             acc = np.zeros(len(names))
             np.add.at(acc, joints[pin].reshape(-1), weights[pin].reshape(-1))
             parent = int(acc[:len(k['bones']['names'])].argmax())
+            if c.get('body_parent'):                 # (not a bone the game swings: a bust's)
+                parent = _body(k, parent)
             axis = world[_anatomical(k, parent)][:3, 3]
             bones = []
             for j, p in enumerate(nodes):
@@ -360,6 +380,8 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
                 world.append(m)
             made.append((len(out), nodes, bones))
             out.append(dict(part=c['part'], bones=bones, neighbours=set(), parent=parent))
+            if c.get('spring'):                      # (its own spring entries: springs())
+                out[-1]['spring'] = c['spring']
         number = {r: m[0] for r, m in enumerate(made) if m is not None}
         # neighbours: chains whose vertices share edges
         e, _ = _edges(a.triangles, n)
@@ -418,15 +440,15 @@ def rig(k, cloths, log=print, spacing=SPACING, link=LINK):
                     joints[vi, q] = j
                     weights[vi, q] = w / total
                 moved += 1
-        drapes += [(bones_of[m[0]], m[1]) for m in made if m is not None]
+        drapes += [(bones_of[m[0]], m[1], c.get('flowing', FLOWING), c.get('down')) for m in made if m is not None]
         log('  %s: %d chains (%s bones) hang from %s; %d vertices skinned to them' % (
             c['name'], len(number), '+'.join(str(len(bones_of[x])) for x in sorted(bones_of)),
             ', '.join(sorted({names[out[x]['parent']].split('@')[0] for x in bones_of})), moved))
     k['bones']['names'], k['bones']['parents'] = names, parents
     k['bones']['world'] = np.array(world)
     draped = []
-    for bones, nodes in drapes:
-        dirs = _drape(nodes, body_pos, body_nrm)
+    for bones, nodes, flowing, down in drapes:
+        dirs = _drape(nodes, body_pos, body_nrm, flowing, down)
         if dirs is not None:
             draped.append((bones, dirs))
     if draped:
@@ -608,9 +630,9 @@ def settle(k, chains, skel, parents, still, body):
 def springs(skel, made, chains, body):
     """The spring file's cloth part: skel the fighter's skeleton with the chains' bones (made: their indices, in
     chain order; chains: rig()'s result), body: the body's vertices without the cloth ((n, 3) bind positions, mm).
-    -> {'entries': [(OPT number, link, length, (outward, inward limit or None) or None: Lars's)], 'capsules':
-    [(bone index, offset, sizes)], 'pairs': [(OPT number, capsule)], 'links': [(OPT number, other OPT number,
-    link)]}."""
+    -> {'entries': [(OPT number, link, length, (outward, inward limit or None) or None: Lars's, or the chain's own
+    'spring' {'flags', 'parameters', 'limits', 'last'})], 'capsules': [(bone index, offset, sizes)], 'pairs': [(OPT
+    number, capsule)], 'links': [(OPT number, other OPT number, link)]}."""
     world = bone.world_matrices(skel)
     names = list(skel['names'])
     chest = world[names.index('cha:MUNE2_jnt')][1, 3]
@@ -667,6 +689,8 @@ def springs(skel, made, chains, body):
     for c, (bones, chain) in enumerate(zip(made, chains)):
         limits = None if any(x in names[skel['parent'][bones[0]]] for x in LIMBS) else (
             OUTWARD, DRAPED_INWARD if chain.get('draped') else None)
+        if chain.get('spring'):
+            limits = chain['spring']
         for j, b in enumerate(bones):
             p = world[b][:3, 3]
             nxt = world[bones[j + 1]][:3, 3] if j + 1 < len(bones) else world[bones[j - 1]][:3, 3]
@@ -720,7 +744,12 @@ def spring_file(mop, template_mop, cloth):
         e = bytearray(by_number[TEMPLATE_FIRST + min(j, TEMPLATE_LINKS - 1)])
         struct.pack_into('>I', e, 0, number)
         struct.pack_into('>f', e, 16, length)
-        if limits is not None:                   # (about local Z: out at 28, in at 32, stored negative)
+        if isinstance(limits, dict):             # (a chain's own spring: flags, the three parameters, the limits
+            struct.pack_into('>I', e, 0x30, limits['flags'])                    # about Y and Z, the last one)
+            struct.pack_into('>3f', e, 4, *limits['parameters'])
+            struct.pack_into('>4f', e, 20, *limits['limits'])
+            struct.pack_into('>f', e, 44, limits['last'])
+        elif limits is not None:                 # (about local Z: out at 28, in at 32, stored negative)
             struct.pack_into('>f', e, 28, limits[0])
             if limits[1] is not None:
                 struct.pack_into('>f', e, 32, -limits[1])

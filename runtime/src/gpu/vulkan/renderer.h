@@ -27,6 +27,7 @@
 // centres fall inside them.
 
 #include "gpu/backend.h"
+#include "gpu/overlay.h"
 #include "gpu/vulkan/context.h"
 #include "gpu/vulkan/formats.h"
 #include "latte/program.h"
@@ -96,6 +97,7 @@ struct Target {
     bool start_copied = false;  // start_copy holds this frame's start
     bool rewrites = false;      // was rewritten after being carried before: copy its start
     Image start_copy, end_copy;
+    Image view_copy; // its content before the view window's replay, put back after it
 };
 
 struct Texture {
@@ -103,6 +105,10 @@ struct Texture {
     Image image;
     VkImageView view = VK_NULL_HANDLE; // with the resource's component selects
     uint32_t memory[2][2] = {}; // guest ranges [begin, end): base levels, mip levels
+    // Where its levels are, as render targets holding them are found (the
+    // swizzle bits of macro-tiled ones cleared); from the resource words,
+    // whose surface layout costs too much to work out at every draw.
+    std::array<uint32_t, 14> level_address{};
     uint64_t loaded = 0;     // event stamp the contents correspond to
     uint64_t hash = 0;       // of the guest data last loaded
     bool dirty = true;       // the CPU wrote its memory since it was loaded
@@ -119,7 +125,6 @@ struct Texture {
 struct ShaderModule {
     VkShaderModule module = VK_NULL_HANDLE;
     latte::TranslatedShader info;
-    bool failed = false;
 };
 
 struct Pipeline {
@@ -153,6 +158,8 @@ public:
     void wait_for(uint64_t value) override;
     uint32_t frames_per_frame() const override { return frames_per_frame_; }
     bool want_replays() override;
+    bool logs_frames() override;
+    bool want_view_replay() override;
     void begin_replay(uint32_t n) override;
     void end_replay() override;
     void frame_shown() override;
@@ -294,8 +301,27 @@ private:
     bool snapshot(uint32_t address, uint32_t size, uint32_t& offset, bool& swapped, uint64_t& hash);
     void record_constants(uint32_t draw_index, const ConstantSources& sources, latte::abi::DrawConstants& dc);
     void replace_constants(uint32_t draw_index, latte::abi::DrawConstants& dc);
+    struct Blend {
+        VkDeviceAddress address; // in the ring
+        uint32_t chunk;          // its ring chunk, marked used by each command buffer reading it
+    };
     uint32_t frames_per_frame_ = 1; // frames shown per frame the title renders
+    // Frames are logged, their draws' constants recorded and the targets
+    // they carry kept (for the extra frames or the view window; set at swaps).
+    bool logging_ = false;
+    void create_records();
     bool replaying_ = false;
+    // The view window (overlay::Window): the frame rendered again with the
+    // camera's matrix replaced, its TV image kept for the overlay.
+    bool view_replay_ = false;
+    std::unordered_map<uint32_t, Blend> view_blocks_; // recorded block offset -> it with the camera replaced (address 0: none)
+    std::vector<std::shared_ptr<const void>> view_windows_; // the windows whose cameras it looks for
+    Image view_image_;
+    bool view_image_valid_ = false;
+    uint32_t view_replaced_ = 0; // blocks the view replay found the camera in
+    uint64_t view_generation_ = 0; // overlay::window_generation() of the last view replay
+    std::vector<Target*> view_kept_; // targets the view replay puts back as they were
+    void view_constants(uint32_t draw_index, latte::abi::DrawConstants& dc);
     bool replayed_ = false; // this frame's extra frames were rendered
     float replay_t_ = 1.0f;          // blend position: 0 the previous frame, 1 this one
     bool replay_blend_ = false;
@@ -304,10 +330,6 @@ private:
     uint64_t record_value_[2] = {}; // last submission reading each record
     int current_record_ = 0;
     std::vector<int32_t> match_;     // this frame's draw -> previous frame's, -1 none
-    struct Blend {
-        VkDeviceAddress address; // in the ring
-        uint32_t chunk;          // its ring chunk, marked used by each command buffer reading it
-    };
     std::unordered_map<uint64_t, Blend> blended_; // (previous, current offset) -> blend
     std::unordered_map<uint32_t, uint32_t> shared_blocks_; // current offset -> previous, of the draws that pair
     void forget_snapshots(uint32_t address, uint32_t size);
@@ -315,8 +337,19 @@ private:
     void note_target_read(const Target* t);
     void copy_image(const Image& src, const Image& dst);
     std::vector<Target*> carried_; // this frame's carried targets
-    uint64_t replays_ = 0, blended_replays_ = 0, skipped_replays_ = 0;
+    uint64_t replays_ = 0, blended_replays_ = 0, skipped_replays_ = 0, busy_skipped_replays_ = 0;
     double match_seconds_ = 0, replay_seconds_ = 0;
+    // The command processor's time without commands: in the statistics'
+    // window, and in the frame just swapped (and that frame's time).
+    double idle_seconds_ = 0, frame_idle_seconds_ = 0, frame_seconds_ = 0;
+    std::chrono::steady_clock::time_point last_swap_{};
+    // Whether it has the time for the replays (want_replays), from averages
+    // over frames: its time to spare per frame without them, the frame's own
+    // work, and their time for each second of that work (which holds when a
+    // scene grows or shrinks). Then the last frame's replay time, and
+    // whether they are left out.
+    double spare_seconds_ = 1.0 / 60, work_seconds_ = 0, replay_ratio_ = 1.0, frame_replay_seconds_ = 0;
+    bool busy_skipping_ = false;
     std::chrono::steady_clock::time_point replay_started_;
 
     // ----------------------------------------------- presentation (present.cpp)
@@ -406,6 +439,36 @@ private:
     VkCommandBuffer present_cmd_ = VK_NULL_HANDLE;
     VkFence present_fence_ = VK_NULL_HANDLE;
 
+    // ------------------------------------------------- overlay (overlay.cpp)
+    // Draws gpu/overlay.h's quads over a presentation image.
+    void draw_overlay(const Image& target);
+    VkShaderModule overlay_module(const char* source, bool vertex);
+    VkPipeline overlay_pipeline(VkFormat format, bool opaque = false); // opaque: the image's alpha left out
+    // The overlay's solids: `pass` 0 their nearest depths, 1 their colours
+    // there, 2 those in front.
+    VkPipeline overlay_solid_pipeline(VkFormat format, int pass);
+    // (view: the part of the TV image they are seen in, in its pixels)
+    void draw_overlay_solids(const Image& target, const void* scene, const float* view_projection, const float* view);
+    // An overlay atlas as an image, uploaded when the layer's atlas changes.
+    struct OverlayAtlas {
+        Image image;
+        const void* source = nullptr;      // the atlas `image` holds
+        std::shared_ptr<const void> keep;  // (kept, so its address names it)
+    };
+    void draw_overlay_quads(const Image& target, OverlayAtlas& cached,
+                            const std::shared_ptr<const overlay::Atlas>& atlas,
+                            const std::shared_ptr<const std::vector<overlay::Quad>>& quads);
+    void draw_overlay_image(const Image& target, const Image& image, const std::vector<overlay::Quad>& quads,
+                            bool opaque = false);
+    VkPipelineLayout overlay_solid_layout_ = VK_NULL_HANDLE;
+    std::map<std::pair<VkFormat, int>, VkPipeline> overlay_solid_pipelines_;
+    Image overlay_depth_; // the solids' depths, at the presentation images' size
+    VkPipelineLayout overlay_layout_ = VK_NULL_HANDLE;
+    VkSampler overlay_sampler_ = VK_NULL_HANDLE;
+    std::map<std::pair<VkFormat, bool>, VkPipeline> overlay_pipelines_;
+    OverlayAtlas overlay_atlas_, overlay_hud_atlas_;
+    int64_t overlay_capture_ = -1; // TTT2_CAPTURE: the TV capture to save again with the overlay
+
     // ------------------------------------------------------ misc (renderer.cpp)
     void load_pipeline_cache();
     void save_pipeline_cache();
@@ -469,7 +532,10 @@ private:
         bool ok;
     };
     std::unordered_map<uint64_t, ProgramEntry> programs_;  // by address/size
-    std::unordered_map<uint64_t, std::unique_ptr<ShaderModule>> shaders_;
+    // By program and environment (null: the shader failed), and by
+    // translation (shared by the environments that translate alike).
+    std::unordered_map<uint64_t, const ShaderModule*> shaders_;
+    std::unordered_map<uint64_t, std::unique_ptr<ShaderModule>> modules_;
     std::unordered_map<uint64_t, VkPipelineLayout> layouts_;
     std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> pipelines_;
     VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;

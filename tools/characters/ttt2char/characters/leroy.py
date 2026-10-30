@@ -12,6 +12,17 @@ TEKKEN7_CODE = 'nsb'
 CODE = 'nsb'
 SEX = 'male'
 
+# Ordered built-in Tekken 7 preset sets for the native costume chooser.
+PRESETS = (
+    ('DefaultCos1P', 'Default'),
+    ('DefaultCos2P', 'Default 2P'),
+    ('1p_c1', '1p c1'),
+    ('black_suit', 'Black suit'),
+    ('black_suit_silver', 'Black suit silver'),
+    ('monkfighter', 'Monkfighter'),
+    ('monkfighter_c1', 'Monkfighter c1'),
+)
+
 DONOR = 'lar'                 # Lars Alexandersson: a slim male skeleton
 DONOR_ROW = 38
 
@@ -68,6 +79,8 @@ VOICE_PREFIX = 'nb'
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 MOVESET = {
     'name': '[LEROY]',
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
+    'bounds': dict.fromkeys(('Nb_WK_4LP', 'Nb_WK_6RK', 'Nb_jpWK02F', 'Nb_t_sWP00'), True),
     'drop_moves': r'^Nb_Direct$',
     'direct': [(r'^(la|mk)_s', 'anim', ['nb_s%02d' % k for k in range(4)]),     # the donor's intros -> his
                (r'^la_w', 'anim', ['nb_w%02d' % k for k in range(3)])],         # win poses

@@ -118,12 +118,12 @@ void test_status() {
         "packs_folder": "/d/ttt2/characters", "future": {"x": 1},
         "movesets": {"folder": "/m", "heihachi": false}, "game": {"path": null, "error": "not a game"},
         "fighters": [{"name": "kazumi", "display": "Kazumi Mishima", "dlc": null, "installed": true,
-                      "moveset_saved": true},
+                      "moveset_saved": true, "outfits": 9, "outfits_added": true},
                      {"name": "eliza", "display": "Eliza", "dlc": 592370, "installed": false, "moveset_saved": false},
                      {"name": "chloe", "display": "Lucky Chloe", "dlc": null, "installed": true, "outdated": true,
-                      "moveset_saved": true},
+                      "update": true, "moveset_saved": true},
                      {"name": "geese", "display": "Geese Howard", "dlc": 592373, "installed": true,
-                      "outdated": false, "moveset_saved": false},
+                      "outdated": false, "update": true, "moveset_saved": false},
                      {"name": "noctis", "display": "Noctis", "dlc": 592374, "installed": false, "outdated": true},
                      {"name": "josie", "display": "Josie Rizal", "dlc": null, "installed": true, "outdated": false,
                       "newer": true},
@@ -152,13 +152,81 @@ void test_status() {
         check(eliza.dlc == 592370 && !eliza.installed && !eliza.outdated && !eliza.added(), "status: eliza");
         check(chloe.installed && chloe.outdated && !chloe.added(), "status: an outdated pack is not in the game");
         check(geese.installed && !geese.outdated && geese.added(), "status: a current pack");
+        check(geese.update && !kazumi.update, "status: a pack to update is still added");
+        check(!chloe.update, "status: an outdated pack is to add again, not to update");
         check(!noctis.installed && !noctis.outdated && !noctis.added(), "status: outdated without a pack is not");
+        check(kazumi.outfits == 9 && kazumi.outfits_added, "status: outfits");
+        check(eliza.outfits == 0 && !eliza.outfits_added && !chloe.outfits_added, "status: no \"outfits\": none");
     }
     const auto missing =
         parse_status(R"({"tekken7": {"found": false, "path": null, "error": "Steam is not installed"}})");
     check(missing && !missing->tekken7_usable() && missing->tekken7_error == "Steam is not installed",
           "status: tekken 7 missing");
     check(missing && missing->heihachi_saved && missing->game_error.empty(), "status: optional fields' defaults");
+    check(missing && !missing->tekken7_readable && !missing->tekken8_found && !missing->tekken8_usable() &&
+              !missing->tekken8_build_known && missing->tekken8_helper.empty() && missing->cc.empty(),
+          "status: an older importer's, without Tekken 8");
+    check(s->fighters[0].of(kTekken7) && !s->fighters[0].stand_in, "status: no \"game\": a Tekken 7 fighter");
+    const auto older = parse_status(R"({"tekken7": {"found": true, "path": "/t", "error": null}})");
+    check(older && older->tekken7_readable && older->readable(kTekken7),
+          "status: no \"readable\": a usable Tekken 7 is readable");
+
+    // Both games: Tekken 7 that cannot run but whose files are there, and
+    // Tekken 8 with a stand-in Reina.
+    const auto both = parse_status(R"({
+        "tools": {"gamescope": "/usr/bin/gamescope", "pactl": "/usr/bin/pactl", "helper": "prebuilt",
+                  "tekken8_helper": "mingw", "cc": "/usr/bin/gcc"},
+        "steam": {"installed": true, "running": true},
+        "tekken7": {"found": true, "path": "/l/TEKKEN 7", "error": "Tekken 7 has not run with Proton yet",
+                    "readable": true},
+        "tekken8": {"found": true, "path": "/l/TEKKEN 8", "error": null, "run_error": null, "build_known": false},
+        "fighters": [{"name": "kazumi", "display": "Kazumi Mishima", "dlc": null, "installed": true,
+                      "moveset_saved": true},
+                     {"name": "reina", "display": "Reina", "dlc": null, "installed": true, "outdated": false,
+                      "newer": false, "update": true, "moveset_saved": false, "stand_in": true, "game": "tekken8"},
+                     {"name": "later", "display": "Later", "dlc": 2732280, "installed": false, "update": false,
+                      "moveset_saved": false, "stand_in": true, "game": "tekken8"}]})");
+    check(both && both->tekken8_helper == "mingw" && both->helper == "prebuilt" && both->cc == "/usr/bin/gcc",
+          "status both: each game's helper, the C compiler");
+    check(both && !both->tekken7_usable() && both->tekken7_readable && both->readable(kTekken7) &&
+              both->found(kTekken7),
+          "status both: Tekken 7 readable, not usable");
+    check(both && both->tekken8_usable() && both->readable(kTekken8) && both->tekken8_path == "/l/TEKKEN 8" &&
+              both->tekken8_build_known == false && both->tekken8_run_error.empty(),
+          "status both: Tekken 8");
+    check(both && both->fighters.size() == 3, "status both: fighters");
+    if (both && both->fighters.size() == 3) {
+        const Fighter &kazumi = both->fighters[0], &reina = both->fighters[1], &later = both->fighters[2];
+        check(kazumi.of(kTekken7) && !kazumi.of(kTekken8) && !kazumi.stand_in, "status both: kazumi");
+        check(reina.of(kTekken8) && reina.added() && reina.stand_in && reina.update && !reina.moveset_saved &&
+                  reina.dlc == 0,
+              "status both: a stand-in Reina to update");
+        check(later.of(kTekken8) && later.dlc == 2732280 && !later.stand_in && !later.added(),
+              "status both: a Tekken 8 DLC fighter, a stand-in only with a pack");
+    }
+
+    // Neither game.
+    const auto neither = parse_status(R"({"steam": {"installed": false, "running": false},
+        "tekken7": {"found": false, "path": null, "error": "Steam is not installed", "readable": false},
+        "tekken8": {"found": false, "path": null, "error": "Tekken 8 is not installed in any Steam library",
+                    "run_error": null, "build_known": null},
+        "fighters": [{"name": "reina", "display": "Reina", "installed": false, "game": "tekken8"}]})");
+    check(neither && !neither->tekken7_usable() && !neither->tekken7_readable && !neither->found(kTekken7) &&
+              !neither->tekken8_usable() && !neither->readable(kTekken8) && !neither->found(kTekken8) &&
+              !neither->tekken8_build_known &&
+              neither->tekken8_error == "Tekken 8 is not installed in any Steam library",
+          "status neither: no game");
+    check(neither && neither->fighters.size() == 1 && !neither->fighters[0].added(), "status neither: fighters");
+
+    // Tekken 8 alone, a build the helper knows, never run with Proton.
+    const auto only8 = parse_status(R"({
+        "tekken7": {"found": false, "path": null, "error": "Tekken 7 is not installed in any Steam library",
+                    "readable": false},
+        "tekken8": {"found": true, "path": "/l/TEKKEN 8", "error": null, "build_known": true,
+                    "run_error": "Tekken 8 has not run with Proton yet: start it once from Steam"}})");
+    check(only8 && !only8->tekken7_readable && only8->tekken8_usable() && only8->tekken8_build_known == true &&
+              only8->tekken8_run_error == "Tekken 8 has not run with Proton yet: start it once from Steam",
+          "status Tekken 8 only");
     check(!parse_status("[1]") && !parse_status("not json"), "status: not an object");
 
     const Ownership owned = parse_owned(R"({"owned": {"eliza": true, "geese": false}})");
@@ -166,6 +234,19 @@ void test_status() {
           "owned: answer");
     check(parse_owned(R"({"error": "Steam is not running"})").error == "Steam is not running", "owned: error");
     check(!parse_owned("garbage").error.empty() && !parse_owned("{}").error.empty(), "owned: malformed");
+
+    const MainNews news = parse_main_news(R"({"ahead": 3, "head": "f434935", "page": "https://github.com/x/compare",
+        "changes": ["Newest", "Older"], "fighters": ["kazumi"], "new": [{"name": "jin", "display": "Jin Kazama"}]})");
+    check(news.error.empty() && news.ahead == 3 && news.head == "f434935" && news.changes.size() == 2 &&
+              news.changes[0] == "Newest" && news.fighters == std::vector<std::string>{"kazumi"} &&
+              news.fresh.size() == 1 && news.fresh[0].second == "Jin Kazama",
+          "main news: answer");
+    check(parse_main_news(R"({"error": "GitHub does not know commit abc"})").error == "GitHub does not know commit abc",
+          "main news: error");
+    check(!parse_main_news("[]").error.empty() && parse_main_news("{}").ahead == 0, "main news: malformed or empty");
+    check(build_commit("0.4.0-1cab8c68f39b") == "1cab8c68f39b" && build_commit("0.4.0").empty() &&
+              build_commit("0.4.0-dirty").empty() && build_commit("").empty(),
+          "build commit");
 }
 
 void test_saved_ownership(const fs::path& root) {
@@ -196,6 +277,10 @@ void test_protocol() {
     check(l.kind == Line::Kind::kSkipped && l.word == "geese" && l.text == "its DLC is not owned", "line: skipped");
     l = parse_line("@added kazumi");
     check(l.kind == Line::Kind::kAdded && l.word == "kazumi", "line: added");
+    l = parse_line("@stand-in reina Steam is not running: start it");
+    check(l.kind == Line::Kind::kStandIn && l.word == "reina" && l.text == "Steam is not running: start it",
+          "line: stand-in");
+    check(parse_line("@stand-in").kind == Line::Kind::kText, "line: stand-in without a fighter is text");
     l = parse_line("@removed chloe");
     check(l.kind == Line::Kind::kRemoved && l.word == "chloe", "line: removed");
     l = parse_line("[ 12%] Building CXX object");
@@ -423,11 +508,13 @@ void test_actions() {
     const auto actions = parse_test_actions(
         "install:/g/TEKKEN (EU).wua:/i/x ; update;add:kazumi, chloe;add-all-base;add-all-owned;remove:kazumi;"
         "uninstall:keep;uninstall:all;play;expand-dlc;expand-log;show-uninstall;wait:1.5;quit;focus:add:kazumi;"
-        "refresh",
+        "refresh;toggle:outfits:kazumi",
         &error);
     check(actions.has_value(), "actions: parse (" + error + ")");
     if (!actions) return;
-    check(actions->size() == 16, "actions: count");
+    check(actions->size() == 17, "actions: count");
+    check((*actions)[16].name == "toggle" && (*actions)[16].args == std::vector<std::string>{"outfits:kazumi"},
+          "actions: toggle");
     check((*actions)[14].name == "focus" && (*actions)[14].args.size() == 1 && (*actions)[14].args[0] == "add:kazumi" &&
               (*actions)[14].label() == "focus-add_kazumi",
           "actions: focus");
@@ -440,6 +527,10 @@ void test_actions() {
               (*actions)[2].label() == "add-kazumi-chloe",
           "actions: add");
     check((*actions)[7].label() == "uninstall-all", "actions: uninstall label");
+    const auto all = parse_test_actions("add-all:tekken8;remove-all:tekken7", &error);
+    check(all && all->size() == 2 && (*all)[0].args == std::vector<std::string>{"tekken8"} &&
+              (*all)[0].label() == "add-all-tekken8" && (*all)[1].label() == "remove-all-tekken7",
+          "actions: a game's Add All and Remove All (" + error + ")");
     const auto settings =
         parse_test_actions("settings; bind:face_bottom:38 ;bind:plus:9;reset-keys;back;bind:zl:64+23", &error);
     check(settings && settings->size() == 6, "actions: settings (" + error + ")");
@@ -455,9 +546,11 @@ void test_actions() {
               "actions: settings, reset-keys, back");
     }
     const auto shown = parse_test_actions(
-        "fullscreen:yes;fullscreen:no;resolution:1920x1080;resolution:AUTO;interpolation:no;interpolation:yes", &error);
-    check(shown && shown->size() == 6, "actions: display settings (" + error + ")");
-    if (shown && shown->size() == 6) {
+        "fullscreen:yes;fullscreen:no;resolution:1920x1080;resolution:AUTO;interpolation:no;interpolation:yes;"
+        "input-delay:yes",
+        &error);
+    check(shown && shown->size() == 7, "actions: display settings (" + error + ")");
+    if (shown && shown->size() == 7) {
         check((*shown)[0].name == "fullscreen" && (*shown)[0].args == std::vector<std::string>{"yes"} &&
                   (*shown)[0].label() == "fullscreen-yes" && (*shown)[1].args[0] == "no",
               "actions: fullscreen");
@@ -469,14 +562,19 @@ void test_actions() {
         check((*shown)[4].name == "interpolation" && (*shown)[4].args[0] == "no" &&
                   (*shown)[5].label() == "interpolation-yes",
               "actions: interpolation");
+        check((*shown)[6].name == "input-delay" && (*shown)[6].args[0] == "yes" &&
+                  (*shown)[6].label() == "input-delay-yes",
+              "actions: input-delay");
     }
     for (const char* bad : {"install:/only", "uninstall:some", "add:", "dance", "play:now", "wait:x", "focus:", "focus",
+                            "toggle:", "toggle",
                             "refresh:now", "bind", "bind:face_bottom", "bind:face_bottom:", "bind:nope:38",
                             "bind:face_bottom:x", "bind:face_bottom:0", "settings:now", "reset-keys:all",
                             "bind:zl:64+", "bind:zl:+64", "bind:zl:64++23", "bind:zl:64+x", "bind:zl:-1",
                             "fullscreen", "fullscreen:", "fullscreen:on", "fullscreen:YES", "interpolation",
-                            "interpolation:1", "resolution", "resolution:", "resolution:1920", "resolution:1366x768",
-                            "resolution:auto:x"}) {
+                            "interpolation:1", "input-delay", "input-delay:2", "input_delay:yes", "resolution",
+                            "resolution:", "resolution:1920", "resolution:1366x768",
+                            "resolution:auto:x", "add-all", "add-all:", "add-all:tekken6", "remove-all"}) {
         check(!parse_test_actions(bad), std::string("actions: rejects ") + bad);
     }
 }
@@ -501,20 +599,24 @@ void test_display(const fs::path& root) {
     for (const bool fullscreen : {false, true}) {
         for (const display::Resolution resolution : display::kResolutions) {
             for (const bool interpolation : {true, false}) {
-                const display::Settings settings{fullscreen, resolution, interpolation};
-                std::string error;
-                const bool ok = save_display(file, settings, &error);
-                const display::Loaded loaded = display::load(file);
-                const std::string what = "display: round trip of " + std::string(display::name_of(resolution)) +
-                                         (fullscreen ? ", fullscreen" : "") + (interpolation ? "" : ", 60 fps");
-                check(ok && error.empty(), what + ", saved (" + error + ")");
-                check(loaded.error.empty() && loaded.settings == settings && text_of(file) == display::format(settings),
-                      what + ", read back");
-                saved += ok;
+                for (const bool input_delay : {false, true}) {
+                    const display::Settings settings{fullscreen, resolution, interpolation, input_delay};
+                    std::string error;
+                    const bool ok = save_display(file, settings, &error);
+                    const display::Loaded loaded = display::load(file);
+                    const std::string what = "display: round trip of " + std::string(display::name_of(resolution)) +
+                                             (fullscreen ? ", fullscreen" : "") + (interpolation ? "" : ", 60 fps") +
+                                             (input_delay ? ", input delay" : "");
+                    check(ok && error.empty(), what + ", saved (" + error + ")");
+                    check(loaded.error.empty() && loaded.settings == settings &&
+                              text_of(file) == display::format(settings),
+                          what + ", read back");
+                    saved += ok;
+                }
             }
         }
     }
-    check(saved == 24, "display: all 24 saved");
+    check(saved == 48, "display: all 48 saved");
     std::error_code ec;
     size_t files = 0;
     for (const auto& entry : fs::directory_iterator(file.parent_path(), ec)) files += entry.path() == file ? 1 : 100;
@@ -610,6 +712,7 @@ void test_uninstall(const fs::path& root) {
     places.saves = root / "home/.local/share/ttt2/save";
     places.packs = root / "data/ttt2/characters";
     places.tekken7_data = root / "home/.local/share/ttt2/tekken7";
+    places.tekken8_data = root / "home/.local/share/ttt2/tekken8";
     const fs::path folder = root / "Games/Tekken Tag Tournament 2";
     const fs::path outside = root / "outside";
 
@@ -654,6 +757,9 @@ void test_uninstall(const fs::path& root) {
             write(places.packs / name / "readme.txt", "user");
         }
         write(places.tekken7_data / "movesets/T7_kazumi.tkmvst", "m");
+        write(places.tekken8_data / "movesets/zbr.motbin", "m");
+        write(places.cache / "ttt2/tekken8/t8helper.exe", "h");
+        write(places.cache / "ttt2/native/oodle.so", "o");
     };
     make();
 
@@ -675,7 +781,8 @@ void test_uninstall(const fs::path& root) {
     check(there(places.saves / "80000001/save.dat") && there(places.packs / "kzm/character.ini") &&
               there(places.packs / ".kzm.part") && there(places.packs / ".dnc.old") &&
               there(places.tekken7_data) && there(places.cache / "ttt2/tekken7") &&
-              there(places.home / ".cache/ttt2/tekken7"),
+              there(places.home / ".cache/ttt2/tekken7") && there(places.tekken8_data) &&
+              there(places.cache / "ttt2/tekken8") && there(places.cache / "ttt2/native"),
           "uninstall: saves and characters kept");
     check(there(places.keyboard()), "uninstall: the keyboard's keys kept (a setting)");
     check(there(places.display()), "uninstall: the display settings kept (a setting)");
@@ -692,8 +799,9 @@ void test_uninstall(const fs::path& root) {
     check(r.refused.empty() && r.problems.empty() && r.folder_removed && r.left.empty(), "uninstall all: ran");
     check(!there(folder) && there(outside / "precious.txt"), "uninstall all: the folder is gone, links not followed");
     check(there(places.desktop_entry()) && there(places.record()), "uninstall all: another install's entries stay");
-    check(!there(places.saves) && !there(places.tekken7_data) && !there(places.cache / "ttt2") &&
-              !there(places.home / ".cache/ttt2"),
+    check(!there(places.saves) && !there(places.tekken7_data) && !there(places.tekken8_data) &&
+              !there(places.cache / "ttt2") && !there(places.home / ".cache/ttt2") &&
+              !there(places.home / ".local/share/ttt2"),
           "uninstall all: data, the default save folder and both helper caches");
     check(!there(places.packs / "kzm") && !there(places.packs / "shared") && !there(places.packs / "shared.part") &&
               !there(places.packs / "shared.old") && there(places.packs / "notapack"),

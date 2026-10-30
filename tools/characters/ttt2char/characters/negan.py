@@ -11,6 +11,14 @@ TEKKEN7_CODE = 'nsa'
 CODE = 'nsa'
 SEX = 'male'
 
+# Ordered built-in Tekken 7 preset sets for the native costume chooser.
+PRESETS = (
+    ('DefaultCos1P', 'Default'),
+    ('DefaultCos2P', 'Default 2P'),
+    ('s9', 'S9'),
+    ('s9_cleanprisoner', 'S9 cleanprisoner'),
+)
+
 DONOR = 'lar'                 # Lars Alexandersson: a slim male skeleton
 DONOR_ROW = 38
 
@@ -65,9 +73,18 @@ VOICE_PREFIX = 'na'
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', DONOR_ROW), ('heihachi', 9), ('self', 23)]
 MOVESET = {
     'name': '[NEGAN]',
+    # 4,2 / 1,4,2: cover the bat through its model-defined tip.
+    # Keep the inner point; extend the outer capsule beyond the inferred 70 cm point.
+    'hitboxes': {'Na_rkrp': (0x72, 0, 0x70, 8)},
+    # bounds (convert/move_overrides.py): the moves the Tekken 7 Bound Mod makes bounds
+    'bounds': dict.fromkeys(('Na_2rp', 'Na_3lklprpkm', 'Na_4lrp', 'Na_4rprp', 'Na_Batrp', 'Na_Batrplk',
+                             'Na_lprpwp'), True),
     'drop_moves': r'^Na_Direct$',
     'direct': [(r'^(la|mk)_s', 'anim', ['na_s%02d' % k for k in range(4)]),     # the donor's intros -> his
                (r'^la_w', 'anim', ['na_w%02d' % k for k in range(4)])],         # win poses
+    # tag combo on his d/f+2 (Tekken 7 names it generically, Co_t_srpF: TTT2 gives its fighters' own d/f+2 none,
+    # 0 of 18, but it is his main launcher, as the other added fighters' own-named d/f+2)
+    'tag_combos': {'Co_t_srpF': True},
 }
 
 # his bat (Lucille) in his right hand, posed by his animations' second extra pair (the first poses the copy for his

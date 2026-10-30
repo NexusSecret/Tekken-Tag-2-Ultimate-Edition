@@ -48,6 +48,7 @@ Launcher::Launcher(GtkApplication* app, Options options) : app_(app), options_(s
     importer_ = find_importer(here, TTT2_LAUNCHER_SOURCE_IMPORTER);
     python_ = find_python(here);
     kit_version_ = kit_version(kit_);
+    build_commit_ = *kBuildCommit ? kBuildCommit : build_commit(kit_version_);
     appimage_ = running_appimage(program_file(), std::getenv("APPIMAGE"), std::getenv("APPDIR"));
     chosen_game_ = options_.game;
     // Steam's last answer to which DLC is owned, until it is asked again.
@@ -78,6 +79,7 @@ Launcher::Launcher(GtkApplication* app, Options options) : app_(app), options_(s
     build_window();
     refresh();
     check_release();
+    check_main();
 }
 
 Launcher::~Launcher() {
@@ -191,7 +193,7 @@ void Launcher::build_window() {
     gtk_box_append(GTK_BOX(names), ui::label("Tekken Tag Tournament 2", "game-title"));
     gtk_box_append(GTK_BOX(names), ui::label("ULTIMATE EDITION", "game-edition"));
     GtkWidget* note = ui::label("The Wii U game as a native Linux program, built on this PC from your own copy, "
-                                "with Tekken 7's characters added from yours.",
+                                "with Tekken 7's and Tekken 8's characters added from yours.",
                                 "game-note small");
     gtk_widget_set_margin_top(note, 6);
     gtk_box_append(GTK_BOX(names), note);
@@ -245,7 +247,7 @@ void Launcher::check_again() {
 
 bool Launcher::busy() const {
     return task_ || status_loading_ || owned_state_ == Owned::kChecking || (preflight_ && preflight_->running) ||
-           release_checking_;
+           release_checking_ || main_checking_;
 }
 
 void Launcher::show_all() {
@@ -272,6 +274,7 @@ Process::Environment Launcher::importer_environment() const {
     // next to it.)
     Process::Environment environment = {{"PYTHONUNBUFFERED", "1"}, {"PYTHONDONTWRITEBYTECODE", "1"}};
     if (there(kit_ / "t7helper.exe")) environment.emplace_back("TTT2_T7HELPER", (kit_ / "t7helper.exe").string());
+    if (there(kit_ / "t8helper.exe")) environment.emplace_back("TTT2_T8HELPER", (kit_ / "t8helper.exe").string());
     return environment;
 }
 
@@ -337,8 +340,9 @@ void Launcher::check_ownership() {
     if (!status_ || owned_state_ != Owned::kUnknown || task_ || !status_->steam_running || !status_->tekken7_usable()) {
         return;
     }
+    // (Tekken 7's DLC: Tekken 8's are not asked yet.)
     bool dlc = false;
-    for (const Fighter& f : status_->fighters) dlc = dlc || f.dlc != 0;
+    for (const Fighter& f : status_->fighters) dlc = dlc || (f.dlc != 0 && f.of(kTekken7));
     if (!dlc) return;
     std::vector<std::string> argv = importer_command("launcher.py");
     argv.push_back("owned");
@@ -414,7 +418,10 @@ void Launcher::on_active(GObject* window, GParamSpec*, gpointer data) {
         return;
     }
     // (GitHub is asked again after hours, not each time.)
-    if (std::chrono::steady_clock::now() - self->release_time_ > std::chrono::hours(6)) self->check_release();
+    if (std::chrono::steady_clock::now() - self->release_time_ > std::chrono::hours(6)) {
+        self->check_release();
+        self->check_main();
+    }
     if (self->busy() || self->testing_) return;
     if (std::chrono::steady_clock::now() - self->status_time_ > std::chrono::seconds(5)) self->refresh();
 }
@@ -543,10 +550,16 @@ void Launcher::run_next_test() {
         update_launcher();
     } else if (a.name == "add") {
         start_import(a.args);
-    } else if (a.name == "add-all-base" || a.name == "add-all-owned") {
-        const auto names = a.name == "add-all-base" ? base_to_add() : owned_to_add();
+    } else if (a.name == "add-all-base" || a.name == "add-all-owned" || a.name == "add-all") {
+        const auto names = a.name == "add-all-owned" ? owned_to_add()
+                                                     : base_to_add(a.name == "add-all" ? a.args[0] : kTekken7);
         if (names.empty()) test_done(false, "no characters to add");
         else start_import(names);
+    } else if (a.name == "remove-all") {
+        // (Without its question.)
+        const auto names = to_remove_all(a.args[0]);
+        if (names.empty()) test_done(false, "no Remove All: its game is there, or fewer than two of its characters");
+        else start_remove(names);
     } else if (a.name == "remove") {
         start_remove(a.args);
     } else if (a.name == "uninstall") {
@@ -582,6 +595,14 @@ void Launcher::run_next_test() {
         const bool ok = widget && gtk_widget_grab_focus(widget);
         gtk_window_set_focus_visible(GTK_WINDOW(window_), TRUE); // (as after a key press: the picture shows it)
         test_done(ok, ok ? "" : "no " + a.args[0] + " that can take the focus");
+    } else if (a.name == "toggle") {
+        GtkWidget* widget = ui::find_id(window_, a.args[0]);
+        const bool ok = widget && GTK_IS_CHECK_BUTTON(widget) && gtk_widget_is_sensitive(widget);
+        if (ok) {
+            GtkCheckButton* box = GTK_CHECK_BUTTON(widget);
+            gtk_check_button_set_active(box, !gtk_check_button_get_active(box));
+        }
+        test_done(ok, ok ? "" : "no check box " + a.args[0] + " that can be clicked");
     } else if (a.name == "refresh") {
         check_again();
         // (Once all it starts has ended: which widget has the focus then.)
@@ -641,7 +662,8 @@ void Launcher::run_next_test() {
         }
         restore_keys();
         test_done(keymap_.is_default(), keymap_.is_default() ? "the default keys" : "not restored");
-    } else if (a.name == "fullscreen" || a.name == "resolution" || a.name == "interpolation") {
+    } else if (a.name == "fullscreen" || a.name == "resolution" || a.name == "interpolation" ||
+               a.name == "input-delay") {
         // The control set as a click sets it (its handler saves display.ini),
         // then the file read back as the game reads it.
         if (!in_settings()) {
@@ -655,6 +677,9 @@ void Launcher::run_next_test() {
         } else if (a.name == "interpolation") {
             wanted.interpolation = a.args[0] == "yes";
             gtk_switch_set_active(GTK_SWITCH(interpolation_switch_), wanted.interpolation);
+        } else if (a.name == "input-delay") {
+            wanted.input_delay = a.args[0] == "yes";
+            gtk_switch_set_active(GTK_SWITCH(input_delay_switch_), wanted.input_delay);
         } else {
             wanted.resolution = display::resolution_named(a.args[0]).value_or(display::Resolution::kAuto);
             const auto& all = display::kResolutions;
@@ -665,7 +690,7 @@ void Launcher::run_next_test() {
         const display::Settings& s = loaded.settings;
         std::string text = std::string("display.ini: fullscreen ") + (s.fullscreen ? "yes" : "no") + ", resolution " +
                            std::string(display::name_of(s.resolution)) + ", interpolation " +
-                           (s.interpolation ? "yes" : "no");
+                           (s.interpolation ? "yes" : "no") + ", input delay " + (s.input_delay ? "yes" : "no");
         if (!loaded.error.empty()) text = loaded.error;
         if (gtk_widget_get_visible(display_error_)) text = gtk_label_get_text(GTK_LABEL(display_error_));
         test_done(loaded.error.empty() && s == wanted && display_ == wanted, text);

@@ -24,7 +24,7 @@
 #include <set>
 #include <string>
 
-#include <openssl/evp.h>
+#include "host/digest.h"
 
 namespace cafe::gpu::vk {
 namespace {
@@ -151,6 +151,12 @@ Texture* Renderer::texture(const uint32_t words[7]) {
         t->memory[0][1] = s.image + s.image_size;
         t->memory[1][0] = s.mipmaps;
         t->memory[1][1] = s.mip_levels > 1 ? uint32_t{s.mipmaps} + s.mipmap_size : uint32_t{s.mipmaps};
+        for (uint32_t level = 0; level < std::min(r.last_level + 1, 14u); ++level) {
+            uint32_t address = level == 0 ? uint32_t{s.image}
+                                          : s.mipmaps + (level > 1 ? uint32_t{s.mip_level_offset[level - 1]} : 0u);
+            if (gx2::is_macro_tiled(r.tile_mode)) address &= ~0x700u;
+            t->level_address[level] = address;
+        }
         for (const auto& range : t->memory) {
             if (range[1] > range[0]) for_pages(range[0], range[1], [&](uint32_t page) { texture_pages_[page].push_back(t.get()); });
         }
@@ -244,14 +250,11 @@ static void report_target_texture_once(uint32_t format, float scale) {
 bool Renderer::load_texture_from_targets(Texture& t) {
     const Resource r = decode(t.words.data());
     const FormatInfo f = color_format(r.format);
-    const gx2::Surface s = surface_of(r);
     const uint32_t levels = std::min(r.last_level + 1, 14u);
     const Target* sources[14] = {};
     uint64_t newest = 0;
     for (uint32_t level = 0; level < levels; ++level) {
-        uint32_t address = level == 0 ? uint32_t{s.image}
-                                      : s.mipmaps + (level > 1 ? uint32_t{s.mip_level_offset[level - 1]} : 0u);
-        if (gx2::is_macro_tiled(r.tile_mode)) address &= ~0x700u;
+        const uint32_t address = t.level_address[level];
         const Target* src = find_target(address, 0, false);
         if (src == nullptr || src->written <= src->overwritten) {
             if (level == 0) return false;
@@ -398,8 +401,7 @@ void Renderer::load_texture(Texture& t) {
         const uint32_t ew = (r.width + block - 1) / block, eh = (r.height + block - 1) / block;
         std::vector<uint8_t> level0(size_t{ew} * eh * f.bytes);
         detile(tiled_level(0), ew, eh, 0, 1, level0.data());
-        unsigned int length = 0;
-        EVP_Digest(level0.data(), level0.size(), md5.data(), &length, EVP_md5(), nullptr);
+        md5 = host::digest<16>(level0);
         if (trace) {
             static std::set<std::array<uint8_t, 16>> seen;
             if (seen.insert(md5).second) {
@@ -560,7 +562,7 @@ void Renderer::invalidate(uint32_t address, uint32_t size, uint32_t coherency_fl
 }
 
 void Renderer::cpu_wrote(uint32_t address, uint32_t size) {
-    if (frames_per_frame_ > 1) forget_snapshots(address, size);
+    if (logging_) forget_snapshots(address, size);
     const uint64_t end = uint64_t{address} + size;
     static const uint32_t watch = [] {
         const char* w = std::getenv("TTT2_WATCH");
