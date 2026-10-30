@@ -595,6 +595,14 @@ void Launcher::run_next_test() {
         const bool ok = widget && gtk_widget_grab_focus(widget);
         gtk_window_set_focus_visible(GTK_WINDOW(window_), TRUE); // (as after a key press: the picture shows it)
         test_done(ok, ok ? "" : "no " + a.args[0] + " that can take the focus");
+    } else if (a.name == "toggle") {
+        GtkWidget* widget = ui::find_id(window_, a.args[0]);
+        const bool ok = widget && GTK_IS_CHECK_BUTTON(widget) && gtk_widget_is_sensitive(widget);
+        if (ok) {
+            GtkCheckButton* box = GTK_CHECK_BUTTON(widget);
+            gtk_check_button_set_active(box, !gtk_check_button_get_active(box));
+        }
+        test_done(ok, ok ? "" : "no check box " + a.args[0] + " that can be clicked");
     } else if (a.name == "refresh") {
         check_again();
         // (Once all it starts has ended: which widget has the focus then.)

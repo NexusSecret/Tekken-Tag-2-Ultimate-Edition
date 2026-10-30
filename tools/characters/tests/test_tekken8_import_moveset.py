@@ -414,11 +414,11 @@ class ImportTekken8(unittest.TestCase):
     def test_folder_reaches_the_import(self):
         runs = []
         args = mock.Mock(tekken7=None, tekken8='/games/TEKKEN 8', movesets=None, files=None, game='g', out=None,
-                         no_shared=True, tekken8_movesets='~/t8')
+                         no_shared=True, tekken8_movesets='~/t8', outfits=set())
         with tempfile.TemporaryDirectory() as out_dir:
             args.out = out_dir
 
-            def run(name, t7, movesets, game, out, make_shared=True, files=None, tekken8=None):
+            def run(name, t7, movesets, game, out, make_shared=True, files=None, tekken8=None, outfits=True):
                 runs.append((name, movesets, tekken8))
                 return importer.pack.write(out_dir, definition(name), {'.nud': b'nud'}, 0)
             with mock.patch.object(import_character, 'needs_packages'), \

@@ -1057,7 +1057,8 @@ added fighter is noted as its donor.
 (`character.ini`'s `outfits = <code> ...`, each code's `.nud .nut .bon .xml
 .mop`, one picture each in `art/costumes.nut`): the importer makes one from
 each of Tekken 7's preset sets for the fighter (a definition's `PRESETS`,
-`convert/outfits.py`); the preset of the fighter's own costume is its own body,
+`convert/outfits.py`), for the fighters `--outfits` names (the launchers'
+Outfits boxes; all by default); the preset of the fighter's own costume is its own body,
 the only one with 2P colour layers (palette entries go by select id, which
 outfits share). The chooser then lists the donor's costume 1 once per outfit
 and the pick (`sub_033E265C`) chooses the body; 14 entries is the chooser's

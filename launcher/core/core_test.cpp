@@ -118,7 +118,7 @@ void test_status() {
         "packs_folder": "/d/ttt2/characters", "future": {"x": 1},
         "movesets": {"folder": "/m", "heihachi": false}, "game": {"path": null, "error": "not a game"},
         "fighters": [{"name": "kazumi", "display": "Kazumi Mishima", "dlc": null, "installed": true,
-                      "moveset_saved": true},
+                      "moveset_saved": true, "outfits": 9, "outfits_added": true},
                      {"name": "eliza", "display": "Eliza", "dlc": 592370, "installed": false, "moveset_saved": false},
                      {"name": "chloe", "display": "Lucky Chloe", "dlc": null, "installed": true, "outdated": true,
                       "update": true, "moveset_saved": true},
@@ -155,6 +155,8 @@ void test_status() {
         check(geese.update && !kazumi.update, "status: a pack to update is still added");
         check(!chloe.update, "status: an outdated pack is to add again, not to update");
         check(!noctis.installed && !noctis.outdated && !noctis.added(), "status: outdated without a pack is not");
+        check(kazumi.outfits == 9 && kazumi.outfits_added, "status: outfits");
+        check(eliza.outfits == 0 && !eliza.outfits_added && !chloe.outfits_added, "status: no \"outfits\": none");
     }
     const auto missing =
         parse_status(R"({"tekken7": {"found": false, "path": null, "error": "Steam is not installed"}})");
@@ -506,11 +508,13 @@ void test_actions() {
     const auto actions = parse_test_actions(
         "install:/g/TEKKEN (EU).wua:/i/x ; update;add:kazumi, chloe;add-all-base;add-all-owned;remove:kazumi;"
         "uninstall:keep;uninstall:all;play;expand-dlc;expand-log;show-uninstall;wait:1.5;quit;focus:add:kazumi;"
-        "refresh",
+        "refresh;toggle:outfits:kazumi",
         &error);
     check(actions.has_value(), "actions: parse (" + error + ")");
     if (!actions) return;
-    check(actions->size() == 16, "actions: count");
+    check(actions->size() == 17, "actions: count");
+    check((*actions)[16].name == "toggle" && (*actions)[16].args == std::vector<std::string>{"outfits:kazumi"},
+          "actions: toggle");
     check((*actions)[14].name == "focus" && (*actions)[14].args.size() == 1 && (*actions)[14].args[0] == "add:kazumi" &&
               (*actions)[14].label() == "focus-add_kazumi",
           "actions: focus");
@@ -563,6 +567,7 @@ void test_actions() {
               "actions: input-delay");
     }
     for (const char* bad : {"install:/only", "uninstall:some", "add:", "dance", "play:now", "wait:x", "focus:", "focus",
+                            "toggle:", "toggle",
                             "refresh:now", "bind", "bind:face_bottom", "bind:face_bottom:", "bind:nope:38",
                             "bind:face_bottom:x", "bind:face_bottom:0", "settings:now", "reset-keys:all",
                             "bind:zl:64+", "bind:zl:+64", "bind:zl:64++23", "bind:zl:64+x", "bind:zl:-1",

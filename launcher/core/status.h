@@ -41,6 +41,11 @@ struct Fighter {
     // own could not be saved when they were added. `update` tells whether
     // their own can be had now. (Only with `added()`.)
     bool stand_in = false;
+    // How many outfits adding them can make (import_character.py
+    // --outfits), 0 for none.
+    int outfits = 0;
+    // Their pack in the game has its outfits. (Only with `added()`.)
+    bool outfits_added = false;
 
     // In the game: a pack it loads.
     bool added() const { return installed && !outdated && !newer; }

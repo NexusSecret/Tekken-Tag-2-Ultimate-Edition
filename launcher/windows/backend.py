@@ -129,11 +129,12 @@ class Settings:
             raise ValueError('Choose the Wii U source and destination in Paths first.')
         return [str(exe), '--install', source, self.values['install']]
 
-    def import_command(self, names, remove=False):
+    def import_command(self, names, remove=False, outfits='none'):
+        """outfits: whose outfits an import makes, as import_character.py --outfits takes it."""
         if not names: raise ValueError('Select one or more fighters.')
         return [sys.executable, '-u', str(self.root / 'tools/characters/import_character.py'), *names,
                 '--game', str(self.title()), '--out', self.values['packs'], '--progress',
-                *(['--remove'] if remove else [])]
+                *(['--remove'] if remove else ['--outfits', outfits])]
 
 
 def failure(lines):
@@ -203,7 +204,7 @@ def importer(settings, *args, timeout=None):
         raise RuntimeError(lines[-1] if lines else 'the importer ended with code %d' % result.returncode)
 
 
-def worker(settings, action, names, cancelled=lambda: False):
+def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
     os.environ.update(settings.environment())
     sys.path[:0] = [str(settings.root / 'local/windows-python'), str(settings.root / 'tools/characters'), str(Path(settings.values['tools']) / 'python')]
     if action == 'setup':
@@ -234,7 +235,7 @@ def worker(settings, action, names, cancelled=lambda: False):
     elif action in ('import', 'remove'):
         from setup_game import ensure_importer
         ensure_importer(settings, run_command)
-        command = settings.import_command(names, action == 'remove')
+        command = settings.import_command(names, action == 'remove', outfits)
         if action == 'import':
             from ttt2char.characters import definition, game_of
             selected = [definition(name) for name in names]

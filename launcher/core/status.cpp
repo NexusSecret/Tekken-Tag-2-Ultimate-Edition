@@ -55,6 +55,8 @@ std::optional<ImporterStatus> parse_status(std::string_view text, std::string* e
         fighter.update = fighter.added() && f["update"].boolean();
         fighter.moveset_saved = f["moveset_saved"].boolean();
         fighter.stand_in = fighter.added() && f["stand_in"].boolean();
+        fighter.outfits = static_cast<int>(f["outfits"].number(0));
+        fighter.outfits_added = fighter.added() && f["outfits_added"].boolean();
         s.fighters.push_back(std::move(fighter));
     }
     return s;
