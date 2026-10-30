@@ -538,8 +538,10 @@ added (the grid moves down a row into the space under it; 45 cells in all;
 the order follows the order of import). The costume chooser
 offers each one's Tekken 7 preset outfits (4 to 10 per fighter) when they are
 imported with them: the launcher has an **Outfits** box for each fighter and
-one for all of them, and the importer makes them for everyone unless told
-otherwise (`--outfits none`, or the fighters' names separated by commas).
+one for all of them (for a fighter already added, changing it offers an
+**Update** that adds or removes their outfits), and the importer makes them
+for everyone unless told otherwise (`--outfits none`, or the fighters' names
+separated by commas).
 Outfits make an import much longer; without them, a fighter has their own
 costume only.
 

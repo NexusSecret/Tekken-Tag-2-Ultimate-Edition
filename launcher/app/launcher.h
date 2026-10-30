@@ -152,11 +152,15 @@ private:
     // once can be removed; else none.
     std::vector<std::string> to_remove_all(const std::string& game) const;
     // Outfits: whether adding `fighter` makes theirs (their checkbox: as
-    // chosen, else as their pack in the game has them), and the characters
-    // whose checkbox counts now (outfits to make, and Add or Update in their
-    // row: the "every character" box sets these).
+    // chosen, else as their pack in the game has them); the characters whose
+    // checkbox can be clicked (outfits to make, a pack this importer may
+    // make: the "every character" box sets these); a character in the game
+    // whose box no longer says what their pack has, so that updating them
+    // adds or removes their outfits; and those that can be updated for it now.
     bool wants_outfits(const Fighter& fighter) const;
     std::vector<const Fighter*> outfit_choices() const;
+    bool outfits_changed(const Fighter& fighter) const;
+    std::vector<std::string> outfits_to_change() const;
     void outfits_line(GtkWidget* card);
     // What every import needs (the importer, Python's packages, the game).
     bool can_import(std::string* why = nullptr) const;

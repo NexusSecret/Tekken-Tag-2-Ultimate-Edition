@@ -342,7 +342,8 @@ class Window:
 
     def addable(self, f):
         s = self.status
-        if not s or (self.added(f) and not f['update']) or f['newer'] or self.owns(f) is False: return False
+        if not s or (self.added(f) and not f['update'] and not self.outfits_changed(f)) or f['newer'] or \
+                self.owns(f) is False: return False
         steam = s['steam']['running']
         if f['dlc']:
             # (Which DLC is owned not known: Steam is asked when adding, which says so then.)
@@ -361,11 +362,21 @@ class Window:
         return self.outfits.get(f['name'], f.get('outfits_added', False))
 
     def outfits_choosable(self, f):
-        """Their row has Add, Add Again or Update (not one only to remove, nor a DLC not owned), and outfits to make."""
-        return bool(f.get('outfits')) and self.owns(f) is not False and (not f['installed'] or f['outdated'] or f['update'])
+        """Outfits to make, and a pack this importer may make (not a newer version's, nor a DLC's not owned)."""
+        return bool(f.get('outfits')) and self.owns(f) is not False and not f['newer']
 
     def outfit_choices(self):
         return [f for f in self.status['fighters'] if self.outfits_choosable(f)] if self.status else []
+
+    def outfits_changed(self, f):
+        """In the game, and their box no longer says what their pack has: updating them adds or removes their outfits.
+        (One to update anyway is updated with their box as it is.)"""
+        return (self.added(f) and not f['update'] and self.outfits_choosable(f)
+                and self.wants_outfits(f) != f.get('outfits_added', False))
+
+    def outfits_to_change(self):
+        return [f['name'] for f in self.outfit_choices() if self.outfits_changed(f) and self.addable(f)
+                and not self.game_why(f.get('game', 'tekken7'))]
 
     def set_outfits(self, names, on):
         for name in names: self.outfits[name] = on
@@ -377,6 +388,10 @@ class Window:
         choices = self.outfit_choices()
         if not choices: return
         wanted = sum(1 for f in choices if self.wants_outfits(f))
+        # (Ticked where an import makes them: not a pack in the game that has them already, with nothing to update.)
+        making = sum(1 for f in choices if self.wants_outfits(f) and (not self.added(f) or f['update']
+                                                                     or not f.get('outfits_added')))
+        changed = [f for f in choices if self.outfits_changed(f)]
         var = tk.BooleanVar(value=wanted == len(choices))
         # (Some or none chosen: all; all: none.)
         every = ttk.Checkbutton(card, text='Import outfits for every character', variable=var, takefocus=True,
@@ -389,9 +404,20 @@ class Window:
         look.Tooltip(every, 'Outfits are complete bodies for the in-game costume chooser. Without them, a character '
                      'has their default costume.', L)
         every.pack(fill='x', pady=(px(14), 0))
-        if wanted:
+        if making:
             self.note(card, 'warning', 'Importing outfits can drastically prolong adding and updating characters: each '
                       'outfit is a complete extra body made from your Tekken 7\'s files.', WARN)
+        # Characters in the game whose box was changed: updating them all at once.
+        if not changed: return
+        names = self.outfits_to_change()
+        b = L.button(card, 'Update All' if len(changed) > 1 else 'Update',
+                     lambda: self.start('import', self.outfits_to_change()))
+        b.configure(state='normal' if names and not self.busy() else 'disabled')
+        if not names and not self.can_import() and not self.busy(): look.Tooltip(b, self.not_addable_why(changed[0]), L)
+        one = changed[0]
+        self.note(card, 'update', '%d characters\' outfits change when they are updated.' % len(changed)
+                  if len(changed) > 1 else '%s\'s outfits are %s when they are updated.'
+                  % (one['display'], 'removed' if one.get('outfits_added') else 'added'), WARN, b)
 
     def removable(self, f):
         """None, or why `f` cannot be removed alone now."""
@@ -457,7 +483,7 @@ class Window:
         why = self.game_why(game)
         head = L.frame(card)
         head.pack(fill='x')
-        to_add = [f['name'] for f in base if not f['update'] and self.addable(f)] if not why else []
+        to_add = [f['name'] for f in base if not self.added(f) and self.addable(f)] if not why else []
         add_all = L.button(head, 'Add All', lambda: self.start('import', to_add))
         add_all.configure(state='normal' if to_add and not busy else 'disabled')
         add_all.pack(side='right', anchor='n', padx=(px(16), 0))
@@ -489,7 +515,7 @@ class Window:
             L.pill(head, '%d of %d owned' % (owned, len(dlc))).pack(side='left', padx=(px(6), 0))
         later = sum(1 for f in dlc if f['update'])
         if later: L.pill(head, '%d to update' % later, 'warn').pack(side='left', padx=(px(6), 0))
-        owned_to_add = [f['name'] for f in dlc if not f['update'] and self.addable(f)] if not why else []
+        owned_to_add = [f['name'] for f in dlc if not self.added(f) and self.addable(f)] if not why else []
         add_owned = L.button(head, 'Add All Owned', lambda: self.start('import', owned_to_add))
         add_owned.configure(state='normal' if owned_to_add and not busy else 'disabled')
         add_owned.pack(side='right')
@@ -533,9 +559,13 @@ class Window:
                                       command=lambda n=f['name'], v=var: self.set_outfits([n], v.get()))
                 outfit_box.var = var
                 if not choosable or self.busy(): outfit_box.state(['disabled'])
-                look.Tooltip(outfit_box, 'Also make their %d outfits for the costume chooser: adding them takes much longer'
-                             % f['outfits'] if choosable else 'Their pack has their outfits' if f.get('outfits_added')
-                             else 'Made without outfits: remove them, then add them with outfits', L)
+                count, has = f['outfits'], f.get('outfits_added')
+                tip = ('Also make their %d outfits for the costume chooser: adding them takes much longer' % count
+                       if not self.added(f) or f['update'] else
+                       ('Their pack has their outfits' if has else 'Their pack has no outfits') if not choosable else
+                       'Their pack has their outfits: untick, then Update, to remove them' if has else
+                       'Tick, then Update, to add their %d outfits (it takes much longer)' % count)
+                look.Tooltip(outfit_box, tip, L)
                 outfit_box.pack(side='left', padx=(px(12), 0))
             buttons = []
             if f['outdated'] or f['update'] or self.added(f):
@@ -544,8 +574,8 @@ class Window:
                 remove.configure(state='normal' if installed and not self.busy() and not not_now else 'disabled')
                 if not_now: look.Tooltip(remove, not_now, L)
                 buttons.append(remove)
-            if not self.added(f) or f['update']:
-                text = 'Update' if f['update'] else 'Add Again' if f['outdated'] else 'Add'
+            if not self.added(f) or f['update'] or self.outfits_changed(f):
+                text = 'Add Again' if f['outdated'] else 'Add' if not self.added(f) else 'Update'
                 add = L.button(line, text, lambda n=f['name']: self.start('import', [n]), width=-8)
                 can = not why and not self.busy() and self.addable(f)
                 add.configure(state='normal' if can else 'disabled')
@@ -571,6 +601,9 @@ class Window:
             return ('Update ready', 'warn', 'They fight with Heihachi\'s moves: updating them gives them their own.'
                     if f.get('stand_in') else 'Made by an older version: they are in the game, and updating them gives '
                     'them what this version adds.')
+        if self.outfits_changed(f):
+            return (('Outfits to remove', 'warn', 'Update them to remove their outfits.') if f.get('outfits_added') else
+                    ('Outfits to add', 'warn', 'Update them to add their outfits.'))
         if f.get('stand_in'):
             return 'Heihachi\'s moves', 'neutral', 'They fight with Heihachi\'s moves until their own can be saved.'
         if self.main_news and f['name'] in self.main_news['fighters'] and self.added(f):
@@ -824,7 +857,7 @@ class Window:
             return self.error(error)
         shown = ', '.join(self.display(n) for n in names) if len(names) < 3 else '%d characters' % len(names)
         updating = action == 'import' and self.status and all(
-            f['update'] for f in self.status['fighters'] if f['name'] in names)
+            f['update'] or self.outfits_changed(f) for f in self.status['fighters'] if f['name'] in names)
         title = (('Updating ' if updating else 'Adding ') + shown if action == 'import' else
                  'Removing ' + shown if action == 'remove' else TASK_TITLES[action])
         if action == 'launcher' and self.release['newer']: title += ' to ' + self.release['newer'].version
