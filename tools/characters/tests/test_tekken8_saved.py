@@ -318,9 +318,9 @@ class OnlyTekken8(unittest.TestCase):
     def add(self, folder, fighters):
         runs = []
         args = mock.Mock(tekken7=None, tekken8=None, movesets=None, files=None, game='g', out=folder, no_shared=False,
-                         tekken8_movesets=None, all=True, remove=False)
+                         tekken8_movesets=None, all=True, remove=False, outfits=set())
 
-        def run(name, t7, movesets, game, out, make_shared=True, files=None, tekken8=None):
+        def run(name, t7, movesets, game, out, make_shared=True, files=None, tekken8=None, outfits=True):
             runs.append(name)
             return pack.write(folder, definition(name), {'.nud': b'nud'}, 0)
         with mock.patch.object(import_character, 'needs_packages'), \

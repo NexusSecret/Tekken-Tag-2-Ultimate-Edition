@@ -151,6 +151,13 @@ private:
     // A game's characters, when that game is gone and only all of them at
     // once can be removed; else none.
     std::vector<std::string> to_remove_all(const std::string& game) const;
+    // Outfits: whether adding `fighter` makes theirs (their checkbox: as
+    // chosen, else as their pack in the game has them), and the characters
+    // whose checkbox counts now (outfits to make, and Add or Update in their
+    // row: the "every character" box sets these).
+    bool wants_outfits(const Fighter& fighter) const;
+    std::vector<const Fighter*> outfit_choices() const;
+    void outfits_line(GtkWidget* card);
     // What every import needs (the importer, Python's packages, the game).
     bool can_import(std::string* why = nullptr) const;
     // What importing a game's characters needs besides: that game, and the
@@ -318,6 +325,7 @@ private:
     bool owned_answer_ = false;           // owned_ holds one
     std::string owned_error_;             // why asking failed
     bool dlc_expanded_ = false;
+    std::map<std::string, bool> outfits_; // the outfit checkboxes clicked, by character
     std::string remove_all_game_; // the game whose Remove All is being asked
 
     std::unique_ptr<Task> task_;

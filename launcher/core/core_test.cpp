@@ -118,7 +118,7 @@ void test_status() {
         "packs_folder": "/d/ttt2/characters", "future": {"x": 1},
         "movesets": {"folder": "/m", "heihachi": false}, "game": {"path": null, "error": "not a game"},
         "fighters": [{"name": "kazumi", "display": "Kazumi Mishima", "dlc": null, "installed": true,
-                      "moveset_saved": true},
+                      "moveset_saved": true, "outfits": 9, "outfits_added": true},
                      {"name": "eliza", "display": "Eliza", "dlc": 592370, "installed": false, "moveset_saved": false},
                      {"name": "chloe", "display": "Lucky Chloe", "dlc": null, "installed": true, "outdated": true,
                       "update": true, "moveset_saved": true},
@@ -155,6 +155,8 @@ void test_status() {
         check(geese.update && !kazumi.update, "status: a pack to update is still added");
         check(!chloe.update, "status: an outdated pack is to add again, not to update");
         check(!noctis.installed && !noctis.outdated && !noctis.added(), "status: outdated without a pack is not");
+        check(kazumi.outfits == 9 && kazumi.outfits_added, "status: outfits");
+        check(eliza.outfits == 0 && !eliza.outfits_added && !chloe.outfits_added, "status: no \"outfits\": none");
     }
     const auto missing =
         parse_status(R"({"tekken7": {"found": false, "path": null, "error": "Steam is not installed"}})");

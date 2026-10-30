@@ -75,6 +75,7 @@ class Window:
         self.game = None            # the game, when started from here
         self.status, self.status_error, self.status_loading, self.status_time = None, '', False, 0.0
         self.owned, self.owned_state = None, 'unknown'
+        self.outfits = {}           # the outfit boxes clicked: {fighter: whether to make their outfits}
         self.release = dict(newer=None, checking=False, time=time.monotonic())
         # What main has beyond this build (launcher.py main), when its commit is known: a test build's
         # own branch instead, whose newer commits update these files (Update, self_update.update_files).
@@ -354,6 +355,44 @@ class Window:
         if self.of(f, 'tekken8'): return 'Start Steam: Tekken 8 needs it to save their moves'
         return 'Start Steam: Tekken 7 needs it to save their moves'
 
+    def wants_outfits(self, f):
+        """Whether adding `f` makes their outfits: as their box was clicked, else as their pack in the game has them."""
+        if not f.get('outfits'): return False
+        return self.outfits.get(f['name'], f.get('outfits_added', False))
+
+    def outfits_choosable(self, f):
+        """Their row has Add, Add Again or Update (not one only to remove, nor a DLC not owned), and outfits to make."""
+        return bool(f.get('outfits')) and self.owns(f) is not False and (not f['installed'] or f['outdated'] or f['update'])
+
+    def outfit_choices(self):
+        return [f for f in self.status['fighters'] if self.outfits_choosable(f)] if self.status else []
+
+    def set_outfits(self, names, on):
+        for name in names: self.outfits[name] = on
+        self.show_characters()
+
+    def outfits_line(self, card):
+        """One box for every character's outfits (their own boxes are in their rows), and what choosing them costs."""
+        L, px = self.look, self.look.px
+        choices = self.outfit_choices()
+        if not choices: return
+        wanted = sum(1 for f in choices if self.wants_outfits(f))
+        var = tk.BooleanVar(value=wanted == len(choices))
+        # (Some or none chosen: all; all: none.)
+        every = ttk.Checkbutton(card, text='Import outfits for every character', variable=var, takefocus=True,
+                                style='Check.Card.TCheckbutton',
+                                command=lambda: self.set_outfits([f['name'] for f in self.outfit_choices()],
+                                                                 not all(self.wants_outfits(f) for f in self.outfit_choices())))
+        every.var = var
+        if 0 < wanted < len(choices): every.state(['alternate'])
+        if self.busy(): every.state(['disabled'])
+        look.Tooltip(every, 'Outfits are complete bodies for the in-game costume chooser. Without them, a character '
+                     'has their default costume.', L)
+        every.pack(fill='x', pady=(px(14), 0))
+        if wanted:
+            self.note(card, 'warning', 'Importing outfits can drastically prolong adding and updating characters: each '
+                      'outfit is a complete extra body made from your Tekken 7\'s files.', WARN)
+
     def removable(self, f):
         """None, or why `f` cannot be removed alone now."""
         s = self.status
@@ -403,6 +442,7 @@ class Window:
             names = fresh[0] if len(fresh) == 1 else ', '.join(fresh[:-1]) + ' and ' + fresh[-1]
             self.note(card, 'info', ('%s adds %s: Update the launcher to get them.' % (self.branch, names)) if self.branch
                       else 'Main adds %s: they come with the next release.' % names)
+        self.outfits_line(card)
         for game in ('tekken7', 'tekken8'):
             tk.Frame(card, bg=CARD_LINE, height=1).pack(fill='x', pady=(px(18), px(16)))
             self.show_game_characters(card, game)
@@ -482,8 +522,21 @@ class Window:
             row.pack(fill='x')
             line = L.frame(row)
             line.pack(fill='x', padx=(px(10), px(4)), pady=px(5))
-            L.label(line, f['display']).pack(side='left')
+            L.label(line, f['display'], width=18).pack(side='left')   # (the outfits' boxes in a column after it)
             owned = self.owns(f)
+            # Their outfits: whether adding them makes theirs, or (in the game with nothing to add) whether their
+            # pack has them.
+            choosable = self.outfits_choosable(f)
+            if choosable or (f.get('outfits') and self.added(f)):
+                var = tk.BooleanVar(value=self.wants_outfits(f) if choosable else f.get('outfits_added', False))
+                outfit_box = ttk.Checkbutton(line, text='Outfits', variable=var, takefocus=True, style='Check.List.TCheckbutton',
+                                      command=lambda n=f['name'], v=var: self.set_outfits([n], v.get()))
+                outfit_box.var = var
+                if not choosable or self.busy(): outfit_box.state(['disabled'])
+                look.Tooltip(outfit_box, 'Also make their %d outfits for the costume chooser: adding them takes much longer'
+                             % f['outfits'] if choosable else 'Their pack has their outfits' if f.get('outfits_added')
+                             else 'Made without outfits: remove them, then add them with outfits', L)
+                outfit_box.pack(side='left', padx=(px(12), 0))
             buttons = []
             if f['outdated'] or f['update'] or self.added(f):
                 remove = L.button(line, 'Remove', lambda n=f['name']: self.start('remove', [n]), 'flat', width=-8)
@@ -758,9 +811,12 @@ class Window:
             logs.mkdir(parents=True, exist_ok=True)
             stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
             logfile, cancel = logs / (action + '-' + stamp + '.log'), logs / (action + '-' + stamp + '.cancel')
+            # (Their outfits as their boxes say.)
+            outfits = ','.join(f['name'] for f in self.status['fighters'] if f['name'] in names and
+                               self.wants_outfits(f)) if action == 'import' and self.status else ''
             command = [sys.executable, '-u', str(Path(__file__).with_name('main.py')), '--build-dir',
                        str(self.settings.build), '--config', str(self.settings.file), '--worker', action,
-                       '--cancel-file', str(cancel), *names]
+                       '--cancel-file', str(cancel), '--outfits', outfits or 'none', *names]
             process = subprocess.Popen(command, cwd=self.settings.root, env=self.settings.environment(),
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8',
                                        errors='replace', creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))

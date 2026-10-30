@@ -372,6 +372,33 @@ class Look:
         st.layout('Switch.TCheckbutton', [('Switch.track', {'sticky': ''})])
         st.configure('Switch.TCheckbutton', background=LIST, padding=0)
         st.map('Switch.TCheckbutton', background=[(s, LIST) for s in ('disabled', 'pressed', 'active', 'focus')])
+        # Check boxes with a label (the outfits'): ticked, a dash for some of several (alternate), empty.
+        b = px(16)
+        def check(mark, focus=False, disabled=False):
+            def draw(p):
+                inset = px(2) if focus else 0
+                if focus: p.fill(rounded(0, 0, b, b, px(5)), FOCUS)
+                fill, line = (ACCENT, ACCENT) if mark else (BUTTON, BUTTON_LINE)
+                if disabled: fill, line = mix(fill, LIST, 0.5), mix(line, LIST, 0.5)
+                p.fill(rounded(inset, inset, b - inset, b - inset, px(4) - inset), line)
+                p.fill(rounded(inset + px(1), inset + px(1), b - inset - px(1), b - inset - px(1), px(3) - inset), fill)
+                white = mix(WHITE, LIST, 0.4) if disabled else WHITE
+                if mark == 'on': p.stroke([(b * 0.27, b * 0.52), (b * 0.44, b * 0.69), (b * 0.74, b * 0.35)], px(2), white)
+                if mark == 'some': p.fill(rounded(b * 0.27, b * 0.44, b * 0.73, b * 0.56, px(1)), white)
+            return self._photo(('check', mark, focus, disabled, b), b, b, draw)
+        st.element_create('Check.box', 'image', check(None),
+                          ('disabled', 'alternate', check('some', disabled=True)),
+                          ('disabled', 'selected', check('on', disabled=True)), ('disabled', check(None, disabled=True)),
+                          ('focus', 'alternate', check('some', True)), ('alternate', check('some')),
+                          ('focus', 'selected', check('on', True)), ('selected', check('on')),
+                          ('focus', check(None, True)), width=b + px(7), sticky='w')
+        for surface, bg in SURFACES.items():
+            name = 'Check.%s.TCheckbutton' % surface.capitalize()
+            st.layout(name, [('Checkbutton.padding', {'sticky': 'nsew', 'children': [
+                ('Check.box', {'side': 'left', 'sticky': ''}), ('Checkbutton.label', {'side': 'left', 'sticky': 'nsew'})]})])
+            st.configure(name, background=bg, foreground=TEXT, padding=0)
+            st.map(name, background=[(s, bg) for s in ('disabled', 'pressed', 'active', 'focus')],
+                   foreground=[('disabled', mix(TEXT, bg, 0.55))])
         # The rest from clam, recoloured.
         st.configure('TCombobox', fieldbackground=BUTTON, background=BUTTON, foreground=TEXT, arrowcolor=TEXT,
                      bordercolor=BUTTON_LINE, lightcolor=BUTTON, darkcolor=BUTTON, selectbackground=BUTTON,
