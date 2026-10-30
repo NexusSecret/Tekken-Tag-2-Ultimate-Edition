@@ -568,7 +568,7 @@ PPC_FUNC(sub_03ADB118) {
     close_submenu(ctx, base); // (left by closing the pause menu)
     update_texts(base, in_practice);
     const uint32_t fighters[2] = {active_fighter(base, 0), active_fighter(base, 1)};
-    title::gauge::fighters_frame(base, fighters);
+    title::gauge::fighters_frame(ctx, base, fighters, in_practice);
     if (in_practice) title::framedata::fighters_frame(base, fighters);
 }
 

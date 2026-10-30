@@ -11,7 +11,7 @@ TEKKEN7_ID = 36               # her id in Tekken 7's roster (TKMovesets2 writes 
 TEKKEN7_CODE = 'elz'          # her code in Tekken 7's files (AkBankVoiceELZ.bnk, Item/Meshes/elz/)
 CODE = 'elz'                  # her three-letter code in the pack (not a code TTT2 already has)
 SEX = 'female'
-REVISION = 1                  # her gauge (packs made before have her EX moves free)
+REVISION = 2                  # her gauge (1: packs made before have her EX moves free); its full sound (2)
 
 # Ordered built-in Tekken 7 preset sets for the native costume chooser.
 PRESETS = (
@@ -126,9 +126,10 @@ VOICE_PREFIX = 'vp'           # her intro and win lines' events in Tekken 7's ba
 # ------------------------------------------------------------------------------------------------ moveset
 # the id maps: Heihachi's moveset in both games, and her generic moves against some TTT2 fighters' (importer.py)
 ALIGN = [('heihachi', 13), ('self', 13), ('heihachi', 14), ('self', 42), ('heihachi', 9), ('self', 23)]
-# her gauge (convert/gauge.py): two stocks of 500, Tekken 7's usual gains, her own HUD
+# her gauge (convert/gauge.py): two stocks of 500, Tekken 7's usual gains, her own HUD, the sound Tekken 7 plays as it
+# fills up
 GAUGE = dict(max=1000, stock=500, gain=(50, 100, 150, 300),
-             hud='/Game/UI_Common/Flash/sw_ui_hud_rage_elz/sw_ui_hud_rage_elz')
+             hud='/Game/UI_Common/Flash/sw_ui_hud_rage_elz/sw_ui_hud_rage_elz', full_sound='SE_battle_spgauge_full')
 
 MOVESET = {
     # Match Noctis d/b+2 on counter hit only; retain normal-hit behavior.

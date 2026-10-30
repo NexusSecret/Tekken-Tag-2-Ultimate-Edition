@@ -729,7 +729,7 @@ constexpr float kPadTop = 10, kPadBottom = 14, kPadSide = 14;
 constexpr float kLabelPx = 12.5f, kValuePx = 13.5f; // text heights (the font's size scaled to)
 // The hint line: the title's hints' height and size (Defensive Training's at
 // x 138, y 643 to 666), the panels above it.
-constexpr float kTipY = 654.5f, kTipIcon = 23, kTipButton = 19, kTipPx = 21, kTipSide = 138, kPanelsBottom = 634;
+constexpr float kTipY = 654.5f, kTipIcon = 23, kTipButton = 19, kTipPx = 21, kTipSide = 138; // (kPanelsBottom: framedata.h)
 constexpr float kAboveGauge = 8; // (and above a 2D fighter's gauge)
 constexpr float kTipSpacing = -1.0f; // added to each glyph's advance
 constexpr uint32_t kTipOutline = 0x000000B0;
@@ -1150,7 +1150,10 @@ void publish(uint8_t* base, const Fighter now[2]) {
     if (history) lay_out_history(l);
     // Until the next fighters' frame, and a little longer: frames can come
     // late; once they stop (the pause menu, the round left) the panels go.
-    std::shared_ptr<const gpu::overlay::Window> window = g.settings[kTopCamera] ? top_window(base, now, bottom) : nullptr;
+    // (level with the higher of the sides' panels: above a 2D fighter's
+    // gauge, which can reach under it, as Geese's does)
+    std::shared_ptr<const gpu::overlay::Window> window =
+        g.settings[kTopCamera] ? top_window(base, now, std::min(side_bottom(0), side_bottom(1))) : nullptr;
     if (!window) g.top.placed = false; // (placed at once when it comes up)
     if (window) {
         // Its frame, under the picture; a label above it.
