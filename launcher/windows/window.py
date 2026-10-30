@@ -20,7 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 import keys
 import look
 import self_update
-from backend import built_by, importer, installed_by
+from backend import built_by, importer, installed_by, native_runtime_ready
 from look import (BAD, CARD_LINE, DIM, HEADER, HEADER_LINE, LIST, LOG, NOTICE, NOTICE_ICON, OK, ROW_LINE, TASK,
                   TASK_LINE, TEXT, WARN, WINDOW)
 
@@ -31,7 +31,8 @@ RESOLUTIONS = [('auto', 'Automatic'), ('1280x720', '1280 × 720'), ('1920x1080',
                ('2560x1440', '2560 × 1440'), ('3840x2160', '3840 × 2160'), ('5120x2880', '5120 × 2880')]
 TASK_TITLES = dict(setup='Setting up the game', build='Building the game', install='Installing the game',
                    update='Updating the installed game', upgrade='Updating the game', launcher='Updating the launcher',
-                   files='Updating the launcher')
+                   files='Updating the launcher', **{'native-import': 'Importing Paul presets',
+                                                    'native-remove': 'Removing Paul presets'})
 FOLDERS = [('source', 'Wii U archive', 'Your European Wii U .wua with update v16', False),
            ('title', 'Extracted Wii U title', 'For development imports, instead of an installed game', True),
            ('install', 'Installation folder', 'Where Set Up Game installs the game', True),
@@ -469,9 +470,69 @@ class Window:
             self.note(card, 'info', ('%s adds %s: Update the launcher to get them.' % (self.branch, names)) if self.branch
                       else 'Main adds %s: they come with the next release.' % names)
         self.outfits_line(card)
+        self.native_costumes_line(card)
         for game in ('tekken7', 'tekken8'):
             tk.Frame(card, bg=CARD_LINE, height=1).pack(fill='x', pady=(px(18), px(16)))
             self.show_game_characters(card, game)
+
+    def native_costumes_line(self, card):
+        L, px = self.look, self.look.px
+        row = L.frame(card)
+        row.pack(fill='x', pady=(px(12), 0))
+        L.label(row, 'Paul Phoenix · Tekken 7 presets', 'card').pack(side='left')
+        button = L.button(row, 'Choose presets…', self.choose_native_costumes)
+        button.pack(side='right')
+        ready = bool(self.settings.installed() and self.readable('tekken7'))
+        button.configure(state='normal' if ready and not self.busy() else 'disabled')
+        L.label(card, 'Adds costumes to the existing Paul. His Tag 2 moveset stays in use.', 'small',
+                wrap=True).pack(fill='x', pady=(px(4), 0))
+        if self.settings.installed() and not native_runtime_ready(self.settings):
+            self.note(card, 'warning', 'Paul presets need this experiment’s game runtime. Build/update the game first.', WARN)
+            build = L.button(card, 'Build costume-enabled game', lambda: self.start('upgrade'))
+            build.pack(anchor='w', pady=(px(6), 0))
+            build.configure(state='disabled' if self.busy() else 'normal')
+
+    def choose_native_costumes(self):
+        sys.path.insert(0, str(self.settings.root / 'tools/characters'))
+        from ttt2char.native_costumes import PRESETS, MAX_SELECTED, installed
+        current = installed(self.settings.values['packs'])
+        selected = set(current or ['DefaultCos1P', 'DefaultCos2P'])
+        dialog = tk.Toplevel(self.root)
+        dialog.title('Paul Phoenix — Tekken 7 presets')
+        dialog.transient(self.root)
+        body = ttk.Frame(dialog, padding=20)
+        body.pack(fill='both', expand=True)
+        ttk.Label(body, text='Choose up to six extra costumes for Paul.').pack(anchor='w')
+        ttk.Label(body, text='All original costumes and five customisation slots are kept.').pack(anchor='w', pady=(4, 12))
+        choices = {}
+        for preset, label in PRESETS:
+            value = tk.BooleanVar(value=preset in selected)
+            choices[preset] = value
+            ttk.Checkbutton(body, text=label, variable=value).pack(anchor='w', pady=3)
+        count = ttk.Label(body)
+        count.pack(anchor='w', pady=(10, 6))
+        buttons = ttk.Frame(body)
+        buttons.pack(fill='x')
+        def import_presets():
+            names = [name for name, value in choices.items() if value.get()]
+            self.start('native-import', names)
+            dialog.destroy()
+        apply = ttk.Button(buttons, text='Import / update presets', command=import_presets)
+        apply.pack(side='right')
+        def remove_presets():
+            self.start('native-remove')
+            dialog.destroy()
+        remove = ttk.Button(buttons, text='Remove imported presets', command=remove_presets)
+        remove.pack(side='left')
+        remove.configure(state='normal' if current else 'disabled')
+        def changed(*_):
+            size = sum(value.get() for value in choices.values())
+            count.configure(text='%d / %d selected. Restart the game after importing.' % (size, MAX_SELECTED))
+            apply.configure(state='normal' if 1 <= size <= MAX_SELECTED and native_runtime_ready(self.settings) else 'disabled')
+        for value in choices.values():
+            value.trace_add('write', changed)
+        changed()
+        dialog.grab_set()
 
     def show_game_characters(self, card, game):
         L, px = self.look, self.look.px
@@ -838,6 +899,8 @@ class Window:
             if action in ('import', 'remove'):
                 if self.game and self.game.poll() is None: raise ValueError('Close the game before changing its characters.')
                 self.settings.import_command(names, action == 'remove')
+            if action in ('native-import', 'native-remove'):
+                self.settings.native_costume_command(names, action == 'native-remove')
             if action in ('install', 'update'): self.settings.installer_command(action == 'update')
             self.settings.save()
             logs = Path(self.settings.values['data']) / 'logs'
@@ -872,7 +935,7 @@ class Window:
         self.task_progress.configure(mode='indeterminate')
         self.task_progress.pack(fill='x', pady=(self.look.px(10), 0), before=self.details_button)
         self.task_progress.start(12)
-        self.task_button.configure(text='Cancel', state='normal' if action in ('import', 'remove', 'launcher', 'files')
+        self.task_button.configure(text='Cancel', state='normal' if action in ('import', 'remove', 'launcher', 'files', 'native-import', 'native-remove')
                                    else 'disabled')
         if not self.task_panel.winfo_ismapped(): self.task_panel.pack(side='bottom', fill='x', before=self.body)
         self.show_all()
@@ -932,7 +995,9 @@ class Window:
             title = {'import': ('Updated ' if task['updating'] else 'Added ') + shown, 'remove': 'Removed ' + shown,
                      'setup': 'The game is set up', 'build': 'The game is built', 'install': 'The game is installed',
                      'update': 'The installed game is updated', 'upgrade': 'The game is updated',
-                     'launcher': 'The launcher is up to date', 'files': 'The launcher is up to date'}[action]
+                     'launcher': 'The launcher is up to date', 'files': 'The launcher is up to date',
+                     'native-import': 'Paul presets imported — restart the game',
+                     'native-remove': 'Imported Paul presets removed'}[action]
             detail = task['step'] if mine else 'Click Play to start it.' if action in (
                 'setup', 'update', 'upgrade', 'install') else ''
         else:
@@ -1313,6 +1378,12 @@ class Window:
             self.dlc_open = True
             self.show_characters()
             self.root.update()
+            self.choose_native_costumes()
+            self.root.update()
+            costume_dialog = next(w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel))
+            costume_boxes = [w for w in walk(costume_dialog) if isinstance(w, ttk.Checkbutton)]
+            assert len(costume_boxes) == 10, len(costume_boxes)
+            costume_dialog.destroy()
             rows = sum(1 for w in walk(self.characters_card) if isinstance(w, tk.Label) and w.cget('text') in
                        {f['display'] for f in (self.status or {}).get('fighters', [])})
             self.open_settings()

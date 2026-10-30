@@ -136,6 +136,31 @@ class Settings:
                 '--game', str(self.title()), '--out', self.values['packs'], '--progress',
                 *(['--remove'] if remove else ['--outfits', outfits])]
 
+    def native_costume_command(self, names, remove=False):
+        sys.path.insert(0, str(self.root / 'tools/characters'))
+        from ttt2char.native_costumes import selection
+        if not remove:
+            selection(names)
+            if not native_runtime_ready(self):
+                raise ValueError('Build and update the costume-enabled game before importing Paul presets.')
+        return [sys.executable, '-u', str(self.root / 'tools/characters/import_native_costumes.py'),
+                '--game', str(self.title()), '--out', self.values['packs'],
+                *(['--remove'] if remove else names)]
+
+
+def native_runtime_ready(settings):
+    """Capability check on the actual installed binary, rather than a launcher version."""
+    import mmap
+    installed = settings.installed()
+    if not installed:
+        return False
+    try:
+        with (installed / 'TTT2 Ultimate.exe').open('rb') as stream:
+            with mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as image:
+                return image.find(b'ttt2: native Paul:') >= 0
+    except (OSError, ValueError):
+        return False
+
 
 def failure(lines):
     """What a failed command's last lines say went wrong, for the task panel: the checks ctest names as failed,
@@ -232,6 +257,13 @@ def worker(settings, action, names, cancelled=lambda: False, outfits='none'):
         self_update.update_files(settings.root, branch, cancelled)
     elif action in ('install', 'update'):
         run_command(settings.installer_command(action == 'update'), settings)
+    elif action in ('native-import', 'native-remove'):
+        from setup_game import ensure_importer
+        ensure_importer(settings, run_command)
+        command = settings.native_costume_command(names, action == 'native-remove')
+        import runpy
+        sys.argv = command[2:]
+        runpy.run_path(command[2], run_name='__main__')
     elif action in ('import', 'remove'):
         from setup_game import ensure_importer
         ensure_importer(settings, run_command)

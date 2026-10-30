@@ -36,6 +36,16 @@ int main() {
     bodies.remember(0, 0, 0);
     check(bodies.resolve(0, 13) == 0, "native fighter clears the selection");
     check(bodies.resolve(5, 74) == 0, "out-of-range slot has no selection");
+    bodies.remember(0, 0, 0x20000); // Native Paul's identity is zero, which is still a valid owner.
+    bodies.remember(1, 0, 0x20001);
+    check(bodies.resolve(0, 0) == 0x20000, "native Paul keeps the first mirror outfit");
+    check(bodies.resolve(1, 0) == 0x20001, "native Paul's other side has an independent outfit");
+    check(bodies.resolve(0, 13) == 0, "changing away from Paul clears his body");
+    check(outfit::native_outfit_index(3, 6, 4, 0x033E3B30) == 0, "first appended native costume");
+    check(outfit::native_outfit_index(3, 6, 9, 0x033E3BDC) == 5, "sixth appended native costume");
+    for (uint32_t choice : {0u, 1u, 2u, 3u, 10u, 11u, 12u, 13u, 14u})
+        check(outfit::native_outfit_index(3, 6, choice, 0x033E3B30) == 6,
+              "native costumes and customization never select an imported body");
     check(outfit::native_style(10, 0x033E2000, 2) == 2, "opening keeps the menu request");
     check(outfit::native_style(10, 0x033E3B30, 10) == 1, "confirmation normalizes native style");
     check(outfit::needs_reload(1, 2, false, 160, 160), "new outfit reloads a completed body");

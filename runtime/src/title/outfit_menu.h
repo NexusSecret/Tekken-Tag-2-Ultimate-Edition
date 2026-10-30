@@ -62,6 +62,18 @@ constexpr uint32_t native_style(size_t outfit_count, uint32_t return_address, ui
     return outfit_count && confirming(return_address) ? 1 : input;
 }
 
+// Appended native-fighter presets follow the original entries. Other choices,
+// including all customization slots and opening the chooser, select no override.
+constexpr size_t native_outfit_index(size_t originals, size_t extras, uint32_t input, uint32_t return_address) {
+    return confirming(return_address) && input > originals && input <= originals + extras
+        ? input - originals - 1 : extras;
+}
+static_assert(native_outfit_index(3, 6, 4, 0x033E3B30) == 0);
+static_assert(native_outfit_index(3, 6, 9, 0x033E3BDC) == 5);
+static_assert(native_outfit_index(3, 6, 3, 0x033E3B30) == 6);
+static_assert(native_outfit_index(3, 6, 10, 0x033E3B30) == 6);
+static_assert(native_outfit_index(3, 6, 4, 0x033E2000) == 6);
+
 // Regression: forcing 1 for an opening request silently commits the fighter.
 static_assert(native_style(7, 0x033E2000, 0) == 0);
 static_assert(native_style(7, 0x033E2000, 2) == 2);
