@@ -31,8 +31,8 @@ RESOLUTIONS = [('auto', 'Automatic'), ('1280x720', '1280 × 720'), ('1920x1080',
                ('2560x1440', '2560 × 1440'), ('3840x2160', '3840 × 2160'), ('5120x2880', '5120 × 2880')]
 TASK_TITLES = dict(setup='Setting up the game', build='Building the game', install='Installing the game',
                    update='Updating the installed game', upgrade='Updating the game', launcher='Updating the launcher',
-                   files='Updating the launcher', **{'native-import': 'Importing Paul presets',
-                                                    'native-remove': 'Removing Paul presets'})
+                   files='Updating the launcher', **{'native-import': 'Importing costume presets',
+                                                    'native-remove': 'Removing costume presets'})
 FOLDERS = [('source', 'Wii U archive', 'Your European Wii U .wua with update v16', False),
            ('title', 'Extracted Wii U title', 'For development imports, instead of an installed game', True),
            ('install', 'Installation folder', 'Where Set Up Game installs the game', True),
@@ -479,59 +479,83 @@ class Window:
         L, px = self.look, self.look.px
         row = L.frame(card)
         row.pack(fill='x', pady=(px(12), 0))
-        L.label(row, 'Paul Phoenix · Tekken 7 presets', 'card').pack(side='left')
+        L.label(row, 'Native roster · Tekken 7 costumes', 'card').pack(side='left')
         button = L.button(row, 'Choose presets…', self.choose_native_costumes)
         button.pack(side='right')
         ready = bool(self.settings.installed() and self.readable('tekken7'))
         button.configure(state='normal' if ready and not self.busy() else 'disabled')
-        L.label(card, 'Adds costumes to the existing Paul. His Tag 2 moveset stays in use.', 'small',
+        L.label(card, 'Adds Tekken 7 outfits to 34 native fighters while keeping their Tag 2 movesets.', 'small',
                 wrap=True).pack(fill='x', pady=(px(4), 0))
         if self.settings.installed() and not native_runtime_ready(self.settings):
-            self.note(card, 'warning', 'Paul presets need this experiment’s game runtime. Build/update the game first.', WARN)
+            self.note(card, 'warning', 'Roster costumes need the updated experiment runtime. Build/update the game first.', WARN)
             build = L.button(card, 'Build costume-enabled game', lambda: self.start('upgrade'))
             build.pack(anchor='w', pady=(px(6), 0))
             build.configure(state='disabled' if self.busy() else 'normal')
 
     def choose_native_costumes(self):
         sys.path.insert(0, str(self.settings.root / 'tools/characters'))
-        from ttt2char.native_costumes import PRESETS, MAX_SELECTED, installed
-        current = installed(self.settings.values['packs'])
-        selected = set(current or ['DefaultCos1P', 'DefaultCos2P'])
+        from ttt2char.native_costumes import installed
+        from ttt2char.native_profiles import PROFILES, presets, page_size
         dialog = tk.Toplevel(self.root)
-        dialog.title('Paul Phoenix — Tekken 7 presets')
+        dialog.title('Native roster — Tekken 7 costumes')
         dialog.transient(self.root)
         body = ttk.Frame(dialog, padding=20)
         body.pack(fill='both', expand=True)
-        ttk.Label(body, text='Choose up to six extra costumes for Paul.').pack(anchor='w')
-        ttk.Label(body, text='All original costumes and five customisation slots are kept.').pack(anchor='w', pady=(4, 12))
-        choices = {}
-        for preset, label in PRESETS:
-            value = tk.BooleanVar(value=preset in selected)
-            choices[preset] = value
-            ttk.Checkbutton(body, text=label, variable=value).pack(anchor='w', pady=3)
+        ttk.Label(body, text='Choose a fighter and the Tekken 7 presets to add.').pack(anchor='w')
+        fighter = ttk.Combobox(body, state='readonly', width=45, values=[p['name'] for p in PROFILES])
+        fighter.current(0)
+        fighter.pack(fill='x', pady=(8, 8))
+        ttk.Label(body, text='Up / Down changes pages in game. Original outfits and five custom slots are kept.').pack(anchor='w')
+        ttk.Label(body, text='Kunimitsu, Slim Bob and Forest Law remain separate.').pack(anchor='w', pady=(3, 8))
+        boxes = ttk.Frame(body)
+        boxes.pack(fill='both', expand=True)
         count = ttk.Label(body)
         count.pack(anchor='w', pady=(10, 6))
+        choices = {}
+        def target(): return PROFILES[fighter.current()]['code']
+        def changed(*_):
+            size = sum(value.get() for value in choices.values())
+            capacity = page_size(target())
+            count.configure(text='%d selected · %d page(s), %d imported outfits per page. Restart after importing.' %
+                            (size, (size + capacity - 1) // capacity, capacity))
+            apply.configure(state='normal' if size and native_runtime_ready(self.settings) else 'disabled')
+        def load_choices(*_):
+            for widget in boxes.winfo_children(): widget.destroy()
+            choices.clear()
+            current = installed(self.settings.values['packs'], target())
+            selected = set(current or [name for name, _ in presets(target())])
+            for index, (preset, label) in enumerate(presets(target())):
+                value = tk.BooleanVar(value=preset in selected)
+                choices[preset] = value
+                ttk.Checkbutton(boxes, text=label, variable=value).grid(row=index % 9, column=index // 9,
+                    sticky='w', padx=(0, 15), pady=3)
+                value.trace_add('write', changed)
+            remove.configure(state='normal' if current else 'disabled')
+            changed()
+        def select_all():
+            for value in choices.values(): value.set(True)
+        ttk.Button(body, text='Select all for this fighter', command=select_all).pack(anchor='w', pady=(0, 8))
         buttons = ttk.Frame(body)
         buttons.pack(fill='x')
         def import_presets():
-            names = [name for name, value in choices.items() if value.get()]
+            names = [target() + ':' + name for name, value in choices.items() if value.get()]
             self.start('native-import', names)
             dialog.destroy()
-        apply = ttk.Button(buttons, text='Import / update presets', command=import_presets)
+        apply = ttk.Button(buttons, text='Import / update fighter', command=import_presets)
         apply.pack(side='right')
         def remove_presets():
-            self.start('native-remove')
+            self.start('native-remove', [target()])
             dialog.destroy()
-        remove = ttk.Button(buttons, text='Remove imported presets', command=remove_presets)
+        remove = ttk.Button(buttons, text='Remove this fighter’s imports', command=remove_presets)
         remove.pack(side='left')
-        remove.configure(state='normal' if current else 'disabled')
-        def changed(*_):
-            size = sum(value.get() for value in choices.values())
-            count.configure(text='%d / %d selected. Restart the game after importing.' % (size, MAX_SELECTED))
-            apply.configure(state='normal' if 1 <= size <= MAX_SELECTED and native_runtime_ready(self.settings) else 'disabled')
-        for value in choices.values():
-            value.trace_add('write', changed)
-        changed()
+        def import_roster():
+            self.start('native-import', ['all'])
+            dialog.destroy()
+        bulk = ttk.Button(body, text='Import all supported roster presets (long task)', command=import_roster)
+        bulk.pack(fill='x', pady=(14, 0))
+        bulk.configure(state='normal' if native_runtime_ready(self.settings) else 'disabled')
+        fighter.bind('<<ComboboxSelected>>', load_choices)
+        load_choices()
         dialog.grab_set()
 
     def show_game_characters(self, card, game):
@@ -900,6 +924,7 @@ class Window:
                 if self.game and self.game.poll() is None: raise ValueError('Close the game before changing its characters.')
                 self.settings.import_command(names, action == 'remove')
             if action in ('native-import', 'native-remove'):
+                if self.game and self.game.poll() is None: raise ValueError('Close the game before changing costumes.')
                 self.settings.native_costume_command(names, action == 'native-remove')
             if action in ('install', 'update'): self.settings.installer_command(action == 'update')
             self.settings.save()
@@ -996,8 +1021,8 @@ class Window:
                      'setup': 'The game is set up', 'build': 'The game is built', 'install': 'The game is installed',
                      'update': 'The installed game is updated', 'upgrade': 'The game is updated',
                      'launcher': 'The launcher is up to date', 'files': 'The launcher is up to date',
-                     'native-import': 'Paul presets imported — restart the game',
-                     'native-remove': 'Imported Paul presets removed'}[action]
+                     'native-import': 'Costume presets imported — restart the game',
+                     'native-remove': 'Imported costume presets removed'}[action]
             detail = task['step'] if mine else 'Click Play to start it.' if action in (
                 'setup', 'update', 'upgrade', 'install') else ''
         else:
@@ -1383,6 +1408,18 @@ class Window:
             costume_dialog = next(w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel))
             costume_boxes = [w for w in walk(costume_dialog) if isinstance(w, ttk.Checkbutton)]
             assert len(costume_boxes) == 10, len(costume_boxes)
+            chooser = next(w for w in walk(costume_dialog) if isinstance(w, ttk.Combobox))
+            assert len(chooser.cget('values')) == 34
+            from ttt2char.native_profiles import PROFILES
+            for index, profile in enumerate(PROFILES):
+                chooser.current(index)
+                chooser.event_generate('<<ComboboxSelected>>')
+                self.root.update()
+                boxes = [w for w in walk(costume_dialog) if isinstance(w, ttk.Checkbutton)]
+                assert len(boxes) == len(profile['presets']), (profile['code'], len(boxes))
+                if native_runtime_ready(self.settings):
+                    apply = next(w for w in walk(costume_dialog) if isinstance(w, ttk.Button) and w.cget('text') == 'Import / update fighter')
+                    assert not apply.instate(['disabled']), profile['code']
             costume_dialog.destroy()
             rows = sum(1 for w in walk(self.characters_card) if isinstance(w, tk.Label) and w.cget('text') in
                        {f['display'] for f in (self.status or {}).get('fighters', [])})

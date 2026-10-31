@@ -255,6 +255,12 @@ std::map<uint32_t, NativeCostumes> g_native;
 std::map<uint32_t, uint32_t> g_native_ids;
 uint32_t g_native_picks[2][2] = {};
 uint32_t g_native_choice = 0;
+struct NativeChooser {
+    uint32_t fighter = 0;
+    outfit_menu::NativePage layout{};
+    std::array<uint8_t, 16 * outfit_menu::kMaxPresets> entries{};
+};
+std::map<uint32_t, NativeChooser> g_native_choosers; // independent state per player cursor
 
 std::map<uint32_t, int> g_outfit_ids;
 // These are private 32-bit keys in the chara master's map, not fighter IDs.
@@ -3133,12 +3139,14 @@ PPC_FUNC(sub_033E265C) {
     const uint32_t old_native = g_native_choice;
     g_native_choice = 0;
     if (const auto native = g_native.find(ctx.r[7]); native != g_native.end() && outfit_menu::confirming(ctx.lr)) {
-        const size_t choice = outfit_menu::native_outfit_index(native->second.native_count,
-            native->second.fighter.outfits.size(), ctx.r[8], ctx.lr);
+        const auto menu = g_native_choosers.find(cursor);
+        const auto layout = menu != g_native_choosers.end() && menu->second.fighter == ctx.r[7]
+            ? menu->second.layout : outfit_menu::NativePage{native->second.native_count, native->second.fighter.outfits.size()};
+        const size_t choice = layout.outfit(ctx.r[8]);
         if (choice < native->second.fighter.outfits.size()) {
             g_native_choice = native->second.fighter.outfits[choice].id;
             if (std::getenv("TTT2_TRACE_ROSTER"))
-                std::fprintf(stderr, "ttt2: native Paul: confirmed extra preset %zu (%s)\n", choice + 1,
+                std::fprintf(stderr, "ttt2: native costume: confirmed extra preset %zu (%s)\n", choice + 1,
                     native->second.fighter.outfits[choice].code.c_str());
             ctx.r[8] = 1; // native equipment style, with the chosen complete body's XML
         }
@@ -3184,12 +3192,25 @@ PPC_FUNC(sub_02669380) {
 PPC_FUNC(sub_033E3460_orig);
 PPC_FUNC(sub_033E3460) {
     const uint32_t cursor = ctx.r[3];
+    const uint32_t native_id = ctx.r[4];
     const int k = slot_of_id(ctx.r[4]);
     const bool added = k >= 0 && g_costumes[k].key != 0;
     const bool pending = load8(cursor + kChooserPending) != 0;
     lend_costume_keys(true);
     sub_033E3460_orig(ctx, base);
     lend_costume_keys(false);
+    if (pending && !load8(cursor + kChooserPending)) {
+        g_native_choosers.erase(cursor);
+        if (const auto native = g_native.find(native_id); native != g_native.end()) {
+            NativeChooser menu;
+            menu.fighter = native_id;
+            menu.layout = {native->second.native_count, native->second.fighter.outfits.size()};
+            if (load8(cursor + kChooserCount) == menu.layout.count()) {
+                std::memcpy(menu.entries.data(), guest_pointer(cursor + kChooserEntries), menu.layout.count() * 16);
+                g_native_choosers[cursor] = std::move(menu);
+            }
+        }
+    }
     if (!added || !pending || load8(cursor + kChooserPending) != 0) return; // not built this time
     const uint32_t count = load8(cursor + kChooserCount);
     uint32_t kept = 0;
@@ -3198,6 +3219,46 @@ PPC_FUNC(sub_033E3460) {
     if (!g_added[k].outfits.empty() && std::getenv("TTT2_TRACE_ROSTER"))
         std::fprintf(stderr, "ttt2: outfit: costume chooser built %u entries for %s\n",
                      kept, g_added[k].code.c_str());
+}
+
+// The native chooser already uses left/right. Up/down turn only the imported
+// page, reusing loaded preview IDs and retaining the native/custom entry records.
+// No guest allocation or chooser rebuild is needed, and mirror cursors are separate.
+PPC_FUNC(sub_033E39B0_orig);
+PPC_FUNC(sub_033E39B0) {
+    const uint32_t cursor = ctx.r[3];
+    const auto found = g_native_choosers.find(cursor);
+    if (found != g_native_choosers.end() && !load8(cursor + kChooserPending)) {
+        auto& menu = found->second;
+        const uint32_t up = load(0x10708ad4) | load(0x10708a94);
+        const uint32_t down = load(0x10708acc) | load(0x10708a8c);
+        const bool previous = (ctx.r[5] & up) != 0, next = (ctx.r[5] & down) != 0;
+        if (menu.layout.pages() > 1 && previous != next) {
+            const auto old = menu.layout;
+            menu.layout.turn(next);
+            const auto page = menu.layout;
+            const size_t initial = std::min(page.capacity(), page.extras);
+            const uint32_t selected = load(cursor + 84);
+            for (size_t i = 0; i < page.visible(); ++i) {
+                const uint32_t entry = cursor + kChooserEntries + 16 * (page.originals + i);
+                std::memcpy(guest_pointer(entry), menu.entries.data() + 16 * page.originals, 16);
+                // The UI loader assigns consecutive picture IDs to the complete container.
+                const uint32_t first = load(entry + 8);
+                store(entry + 8, first + static_cast<uint32_t>(page.offset() + i));
+            }
+            std::memcpy(guest_pointer(cursor + kChooserEntries + 16 * (page.originals + page.visible())),
+                menu.entries.data() + 16 * (page.originals + initial), 5 * 16);
+            store8(cursor + kChooserCount, static_cast<uint8_t>(page.count()));
+            const size_t position = selected >= old.originals + old.visible()
+                ? page.originals + page.visible() + selected - old.originals - old.visible()
+                : std::min<size_t>(selected, page.originals + page.visible() - 1);
+            store(cursor + 84, static_cast<uint32_t>(std::min(position, page.count() - 1)));
+            if (std::getenv("TTT2_TRACE_ROSTER"))
+                std::fprintf(stderr, "ttt2: native costume page: cursor %08x page %zu/%zu, %zu entries\n",
+                    cursor, page.page + 1, page.pages(), page.count());
+        }
+    }
+    sub_033E39B0_orig(ctx, base);
 }
 
 // ------------------------------------------------------------------ extra bones (see kPlayerAnimator)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <algorithm>
 #include <cstdint>
 #include <array>
 #include <map>
@@ -14,6 +15,23 @@ namespace cafe::title::outfit_menu {
 // before our hook hides them. Ten presets therefore leave four such rows.
 constexpr size_t kMaxPresets = 14;
 static_assert(92 + 16 * kMaxPresets <= 324);
+
+// A page always repeats the native costumes and all five customization slots.
+// Only the imported portion changes; its absolute index is the body's identity.
+struct NativePage {
+    size_t originals, extras, page = 0;
+    constexpr size_t capacity() const { return kMaxPresets > originals + 5 ? kMaxPresets - originals - 5 : 0; }
+    constexpr size_t pages() const { return capacity() ? (extras + capacity() - 1) / capacity() : 0; }
+    constexpr size_t offset() const { return page * capacity(); }
+    constexpr size_t visible() const { return offset() < extras ? std::min(capacity(), extras - offset()) : 0; }
+    constexpr size_t count() const { return originals + visible() + 5; }
+    constexpr size_t outfit(uint32_t input) const {
+        return input > originals && input <= originals + visible() ? offset() + input - originals - 1 : extras;
+    }
+    constexpr void turn(bool forward) {
+        if (pages()) page = forward ? (page + 1) % pages() : (page + pages() - 1) % pages();
+    }
+};
 
 // Preflight the whole namespace before registering anything, including packs
 // appearing after an outfit owner. Reject both owners of a duplicate code.

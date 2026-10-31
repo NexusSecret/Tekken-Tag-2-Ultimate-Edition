@@ -18,7 +18,8 @@ class NativeCostumeTests(unittest.TestCase):
     def test_selection_deduplicates_and_keeps_stable_codes(self):
         self.assertEqual(native.selection(['cb', 'DefaultCos1P', 'cb']), ['DefaultCos1P', 'cb'])
         self.assertEqual(native.body_code('cb'), 'pvd')
-        for invalid in ([], ['unknown'], [name for name, _ in native.PRESETS][:7]):
+        self.assertEqual(len(native.selection([name for name, _ in native.PRESETS])), 10)
+        for invalid in ([], ['unknown']):
             with self.assertRaises(InputError):
                 native.selection(invalid)
 

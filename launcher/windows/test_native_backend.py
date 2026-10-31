@@ -1,4 +1,4 @@
-"""Native Paul launcher commands and actual-runtime capability checks."""
+"""Native roster launcher commands and actual-runtime capability checks."""
 from pathlib import Path
 import tempfile
 import unittest
@@ -26,12 +26,26 @@ class NativeBackendTests(unittest.TestCase):
         exe.write_bytes(b'old game')
         with self.assertRaisesRegex(ValueError, 'costume-enabled'):
             self.settings.native_costume_command(['DefaultCos1P'])
-        exe.write_bytes(b'header\x00ttt2: native Paul:\x00test')
+        exe.write_bytes(b'header\x00ttt2: native Paul:\x00old-six-slot-build')
+        self.assertFalse(native_runtime_ready(self.settings))
+        exe.write_bytes(b'header\x00ttt2: native costume pages v1:\x00old-paul-only-build')
+        self.assertFalse(native_runtime_ready(self.settings))
+        exe.write_bytes(b'header\x00ttt2: native roster costumes v2:\x00test')
         self.assertTrue(native_runtime_ready(self.settings))
         command = self.settings.native_costume_command(['DefaultCos1P', 'cb'])
         self.assertEqual(command[-2:], ['DefaultCos1P', 'cb'])
         self.assertIn(str(self.root / 'tools/characters/import_native_costumes.py'), command)
         self.assertNotIn('import_character.py', ' '.join(command))
+
+    def test_roster_requests_keep_target_and_presets_separate(self):
+        (self.game / 'TTT2 Ultimate.exe').write_bytes(b'ttt2: native roster costumes v2:')
+        command = self.settings.native_costume_command(['jul:DefaultCos1P', 'jul:nature'])
+        self.assertEqual(command[-4:], ['--fighter', 'jul', 'DefaultCos1P', 'nature'])
+        self.assertEqual(self.settings.native_costume_command(['all'])[-1], '--all-roster')
+        self.assertEqual(self.settings.native_costume_command(['law'], remove=True)[-3:], ['--fighter', 'law', '--remove'])
+        from ttt2char import InputError
+        with self.assertRaises(InputError):
+            self.settings.native_costume_command(['law:DefaultCos1P', 'jul:DefaultCos1P'])
 
     def test_remove_does_not_require_the_new_runtime(self):
         command = self.settings.native_costume_command([], remove=True)

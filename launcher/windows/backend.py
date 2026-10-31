@@ -139,13 +139,16 @@ class Settings:
     def native_costume_command(self, names, remove=False):
         sys.path.insert(0, str(self.root / 'tools/characters'))
         from ttt2char.native_costumes import selection
+        from ttt2char.native_profiles import request
+        all_roster = names == ['all'] and not remove
+        fighter, selected = ('pau', []) if all_roster else request(names, remove)
         if not remove:
-            selection(names)
+            if not all_roster: selection(selected, fighter)
             if not native_runtime_ready(self):
-                raise ValueError('Build and update the costume-enabled game before importing Paul presets.')
+                raise ValueError('Build and update the costume-enabled game before importing roster presets.')
         return [sys.executable, '-u', str(self.root / 'tools/characters/import_native_costumes.py'),
                 '--game', str(self.title()), '--out', self.values['packs'],
-                *(['--remove'] if remove else names)]
+                *(['--all-roster'] if all_roster else ['--fighter', fighter, *(['--remove'] if remove else selected)])]
 
 
 def native_runtime_ready(settings):
@@ -157,7 +160,7 @@ def native_runtime_ready(settings):
     try:
         with (installed / 'TTT2 Ultimate.exe').open('rb') as stream:
             with mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as image:
-                return image.find(b'ttt2: native Paul:') >= 0
+                return image.find(b'ttt2: native roster costumes v2:') >= 0
     except (OSError, ValueError):
         return False
 
