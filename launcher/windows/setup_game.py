@@ -154,7 +154,8 @@ def prepare_rpx(settings, run):
     else:
         workspace = settings.root / 'local/windows-setup'
         workspace.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix='analysis-', dir=workspace) as temporary:
+        # Keep extracted scratch files outside cloud-synced project folders.
+        with tempfile.TemporaryDirectory(prefix='ttt2-analysis-') as temporary:
             run([str(settings.build / 'wua_extract.exe'), 'extract-analysis', str(source), temporary], settings)
             selected = verified_rpx(Path(temporary), expected)
             part = destination.with_suffix('.part'); shutil.copy2(selected, part); part.replace(destination)
